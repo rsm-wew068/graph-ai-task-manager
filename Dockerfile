@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Create cache directory with proper permissions
+RUN mkdir -p /.cache && chmod 777 /.cache
+
 COPY requirements.txt ./
 RUN pip3 install -r requirements.txt langgraph
 

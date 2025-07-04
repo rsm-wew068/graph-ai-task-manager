@@ -2,7 +2,20 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+# Global variable to hold the model (lazy loaded)
+model = None
+
+def get_model():
+    """Get the sentence transformer model, loading it if necessary."""
+    global model
+    if model is None:
+        try:
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"Warning: Failed to load sentence transformer model: {e}")
+            # Fallback: return None and handle gracefully in calling functions
+            return None
+    return model
 
 def chunk_text(text, chunk_size=512):
     tokens = text.split()
@@ -12,6 +25,10 @@ def build_faiss_index(chunks, batch_size=512, max_chunks=100000):
     if len(chunks) > max_chunks:
         chunks = chunks[:max_chunks]
 
+    model = get_model()
+    if model is None:
+        raise RuntimeError("Failed to load sentence transformer model")
+        
     dim = model.get_sentence_embedding_dimension()
     index = faiss.IndexFlatL2(dim)
 
@@ -45,6 +62,10 @@ def retrieve_similar_chunks(query, index=None, chunks=None, k=3):
     if chunks is None:
         raise ValueError("Must provide chunks list for index reference.")
 
+    model = get_model()
+    if model is None:
+        raise RuntimeError("Failed to load sentence transformer model")
+        
     vector = model.encode([query])
     D, I = index.search(np.array(vector, dtype=np.float32), k)
     return [chunks[i] for i in I[0]]
