@@ -3,8 +3,12 @@ import difflib
 from pyvis.network import Network
 import os
 import networkx as nx
+from .graphrag import GraphRAG
 
-# Basic resolver (exact and fuzzy match fallback)
+# Initialize GraphRAG instance
+graphrag = GraphRAG()
+
+# Basic resolver (exact and fuzzy match fallback) - kept for backward compatibility
 def resolve_topic_node(G, name_guess):
     topic_nodes = [n for n, d in G.nodes(data=True) if d.get("label") == "Topic"]
 
@@ -20,9 +24,45 @@ def resolve_topic_node(G, name_guess):
 
     return None
 
-# Utility function to infer topic name from query
+# Enhanced topic inference using semantic understanding
 def infer_topic_name(query: str) -> str:
-    return query.split()[-1]  # placeholder fallback if no GPT used here
+    """
+    Infer topic name from query using semantic analysis.
+    This replaces the naive query.split()[-1] approach.
+    """
+    # Use GraphRAG for semantic topic inference
+    if graphrag.load_graph_with_embeddings():
+        relevant_nodes = graphrag.semantic_node_search(query, top_k=1)
+        if relevant_nodes:
+            top_node, confidence = relevant_nodes[0]
+            if confidence > 0.3:  # Reasonable confidence threshold
+                # Extract topic name from the most relevant node
+                if graphrag.graph and top_node in graphrag.graph:
+                    attrs = graphrag.graph.nodes[top_node]
+                    if attrs.get('label') == 'Topic':
+                        return attrs.get('name', top_node)
+                    # If not a topic node, find connected topics
+                    for neighbor in graphrag.graph.neighbors(top_node):
+                        neighbor_attrs = graphrag.graph.nodes[neighbor]
+                        if neighbor_attrs.get('label') == 'Topic':
+                            return neighbor_attrs.get('name', neighbor)
+    
+    # Fallback to simple extraction if GraphRAG fails
+    # Look for project/topic keywords
+    query_lower = query.lower()
+    keywords = ['project', 'topic', 'calendar', 'report', 'system', 'launch']
+    
+    words = query.split()
+    for i, word in enumerate(words):
+        if word.lower() in keywords and i < len(words) - 1:
+            # Return the word after the keyword
+            return words[i + 1]
+    
+    # Last resort: return the last meaningful word (not prepositions/articles)
+    stop_words = {'for', 'on', 'in', 'at', 'by', 'to', 'the', 'a', 'an', 'is', 'are'}
+    meaningful_words = [w for w in words if w.lower() not in stop_words and len(w) > 2]
+    
+    return meaningful_words[-1] if meaningful_words else query.split()[-1]
 
 def get_topic_subgraph(topic_name: str, graph_path="topic_graph.gpickle"):
     try:
@@ -132,28 +172,31 @@ def build_and_save_graph(topic, graph_path="topic_graph.gpickle"):
     return filename
 
 def query_graph(topic_info, graph_path="topic_graph.gpickle"):
-    """Query the graph for information about a topic."""
-    try:
-        if not os.path.exists(graph_path):
-            return "No topic graph found. Please process some emails first."
-        
-        with open(graph_path, "rb") as f:
-            G = pickle.load(f)
-        
-        topic_name = topic_info.get("name", "")
-        actual_node = resolve_topic_node(G, topic_name)
-        
-        if not actual_node:
-            return f"Could not find topic: {topic_name}"
-        
-        # Get subgraph around the topic
-        ego = nx.ego_graph(G, actual_node, radius=3)
-        
-        # Format the graph data as text
-        return format_graph_observation(ego)
+    """
+    Query the graph for information about a topic using enhanced GraphRAG.
+    This replaces the naive ego_graph approach with semantic reasoning.
+    """
+    # Extract query from topic_info
+    if isinstance(topic_info, dict):
+        query = topic_info.get("name", "")
+    else:
+        query = str(topic_info)
     
+    if not query:
+        return "No query provided."
+    
+    # Use our enhanced GraphRAG for semantic querying
+    try:
+        graphrag_instance = GraphRAG(graph_path)
+        result = graphrag_instance.query_with_semantic_reasoning(query)
+        
+        # Format the result using our formatter
+        from .graphrag import format_graphrag_response
+        return format_graphrag_response(result)
+        
     except Exception as e:
-        return f"Error querying graph: {str(e)}"
+        # Fallback to old method if GraphRAG fails
+        return f"GraphRAG error: {str(e)}. Please check the graph file."
 
 def visualize_graph(topic_name, graph_path="topic_graph.gpickle"):
     """Create a visualization of the topic graph."""

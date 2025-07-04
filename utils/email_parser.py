@@ -27,14 +27,36 @@ def get_text_from_mbox_email(msg):
             return msg.get_payload()
     return ""
 
-def parse_mbox(mbox_path):
+def parse_mbox(mbox_path, max_emails=None):
+    """Parse mbox file with early termination at limit."""
     mbox = mailbox.mbox(mbox_path)
     emails = []
+    processed_count = 0
+    
+    # Set a reasonable default if no limit specified
+    if max_emails is None:
+        max_emails = 100  # Default limit to prevent huge processing
+    
     for msg in mbox:
+        # Stop immediately when we hit the limit
+        if processed_count >= max_emails:
+            break
+            
         try:
+            # Simplified date parsing - less fallback for speed
+            date_str = msg.get("Date")
+            parsed_date = "1970-01-01T00:00:00"  # Default fallback
+            
+            if date_str:
+                try:
+                    parsed_date = parsedate_to_datetime(date_str).isoformat()
+                except (ValueError, TypeError):
+                    # Skip complex fallback parsing for speed
+                    pass
+            
             email_data = {
                 "Message-ID": msg.get("Message-ID"),
-                "Date": parsedate_to_datetime(msg.get("Date")).isoformat() if msg.get("Date") else None,
+                "Date": parsed_date,
                 "From": msg.get("From"),
                 "To": msg.get("To"),
                 "Subject": msg.get("Subject"),
@@ -45,17 +67,26 @@ def parse_mbox(mbox_path):
                 "X-bcc": msg.get("Bcc"),
             }
             emails.append(email_data)
+            processed_count += 1
+            
         except Exception:
+            # Still count failed emails toward the limit to avoid infinite loops
+            processed_count += 1
             continue
+    
+    print(f"Parsed {len(emails)} emails (limit: {max_emails})")
     return pd.DataFrame(emails)
 
 def extract_and_find_mbox(zip_path, extract_to="extracted_mbox"):
+    """Find mbox file in ZIP without extracting everything."""
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_to)
-    for root, _, files in os.walk(extract_to):
-        for file in files:
-            if file.endswith(".mbox"):
-                return os.path.join(root, file)
+        # First, just list files to find .mbox without extracting
+        for file_info in zip_ref.filelist:
+            if file_info.filename.endswith(".mbox"):
+                # Extract only the .mbox file
+                zip_ref.extract(file_info.filename, extract_to)
+                return os.path.join(extract_to, file_info.filename)
+    
     raise FileNotFoundError("No .mbox file found in uploaded Gmail ZIP.")
 
 # Example usage (only run when script is executed directly)
@@ -77,19 +108,60 @@ if __name__ == "__main__":
 
 
 def extract_display_name(x):
-    """Extract display name from email address string."""
+    """Extract and clean display name from email address string."""
     if not isinstance(x, str):
         return ""
+    
+    # Handle multiple email addresses separated by commas
+    if ',' in x and '@' in x.split(',')[0] and '@' in x.split(',')[1]:
+        # Multiple emails - take the first one
+        x = x.split(',')[0].strip()
+    
+    # Extract name part before < or @
     match = re.match(r"^([^<@]+)", x)
     if match:
         name = match.group(1).strip()
-        # If it's "Last, First", flip it
-        if ',' in name:
-            parts = [p.strip() for p in name.split(',')]
-            if len(parts) == 2:
+    else:
+        # Fallback: try to extract from angle brackets
+        angle_match = re.search(r'"?([^"<>]+)"?\s*<', x)
+        if angle_match:
+            name = angle_match.group(1).strip()
+        else:
+            name = x.strip()
+    
+    # Clean formatting symbols and quotes
+    name = re.sub(r'^["\']|["\']$', '', name)  # Remove surrounding quotes
+    name = re.sub(r'[<>]', '', name)  # Remove angle brackets
+    # Clean extra quotes/spaces
+    name = re.sub(r'^\s*["\']*\s*|\s*["\']*\s*$', '', name)
+    
+    # Keep letters, spaces, hyphens, periods, commas, apostrophes
+    name = re.sub(r'[^\w\s\-\.,\']+', '', name)
+    name = re.sub(r'\s+', ' ', name)  # Normalize whitespace
+    name = name.strip()
+    
+    # Handle "Last, First" format
+    if ',' in name and '@' not in name:
+        parts = [p.strip() for p in name.split(',')]
+        if len(parts) == 2 and len(parts[0]) > 0 and len(parts[1]) > 0:
+            # Only flip if both parts look like names (not email-like)
+            part0_clean = not re.search(r'[@\.]', parts[0])
+            part1_clean = not re.search(r'[@\.]', parts[1])
+            if part0_clean and part1_clean:
                 return f"{parts[1]} {parts[0]}"
-        return name
-    return x.strip()
+    
+    # If result is empty or looks like an email, try to extract from original
+    if not name or '@' in name:
+        # Try to extract from email address username
+        email_match = re.search(r'([^@<>\s]+)@', x)
+        if email_match:
+            username = email_match.group(1)
+            # Convert common username patterns to readable names
+            username = re.sub(r'[._-]', ' ', username)
+            username = username.title()
+            return username if username else "Unknown"
+    
+    return name if name else "Unknown"
 
 
 def clean_email_body(text):
@@ -106,13 +178,22 @@ def clean_email_body(text):
 
 def clean_dataframe(df_emails):
     """Clean the email dataframe with various transformations."""
-    # Step 1: Clean timezone labels
-    df_emails['clean_date'] = df_emails['Date'].str.replace(
-        r'\s+\(.*\)', '', regex=True)
+    # Step 1: Filter out emails with None dates first
+    df_emails = df_emails.dropna(subset=['Date'])
+    
+    # Step 2: Clean timezone labels (only for string dates)
+    if df_emails['Date'].dtype == 'object':
+        df_emails['clean_date'] = df_emails['Date'].str.replace(
+            r'\s+\(.*\)', '', regex=True)
+    else:
+        df_emails['clean_date'] = df_emails['Date']
 
-    # Step 2: Parse datetime safely & force conversion
+    # Step 3: Parse datetime safely & force conversion
     df_emails['Date'] = pd.to_datetime(
         df_emails['clean_date'], errors='coerce', utc=True)
+    
+    # Step 4: Drop any rows where date parsing failed
+    df_emails = df_emails.dropna(subset=['Date'])
 
     # Drop columns that exist
     columns_to_drop = ['Mime-Version', 'Content-Type', 'Content-Transfer-Encoding', 'clean_date']
@@ -145,25 +226,73 @@ def clean_dataframe(df_emails):
 
     return df_emails
 
-def parse_uploaded_file(uploaded_file):
-    """Parse an uploaded ZIP file containing .mbox data."""
+def parse_uploaded_file(uploaded_file, max_emails=None):
+    """Parse an uploaded ZIP file containing .mbox data efficiently."""
     import tempfile
     import os
+    import io
     
+    # For small files, process in memory; for large files, use temp file
+    file_size = len(uploaded_file.getvalue())
+    
+    if file_size < 50 * 1024 * 1024:  # Less than 50MB - process in memory
+        try:
+            # Parse directly from memory
+            zip_bytes = io.BytesIO(uploaded_file.getvalue())
+            with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
+                # Find .mbox file
+                mbox_filename = None
+                for file_info in zip_ref.filelist:
+                    if file_info.filename.endswith(".mbox"):
+                        mbox_filename = file_info.filename
+                        break
+                
+                if not mbox_filename:
+                    raise ValueError("No .mbox file found in the uploaded ZIP")
+                
+                # Extract .mbox content to memory
+                with zip_ref.open(mbox_filename) as mbox_file:
+                    # Create temporary file for mbox content only
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix='.mbox'
+                    ) as tmp_mbox:
+                        tmp_mbox.write(mbox_file.read())
+                        tmp_mbox_path = tmp_mbox.name
+                
+                try:
+                    # Parse the mbox file with optional limit
+                    df_emails = parse_mbox(
+                        tmp_mbox_path, max_emails=max_emails
+                    )
+                    
+                    # Clean the dataframe
+                    df_emails = clean_dataframe(df_emails)
+                    
+                    return df_emails
+                finally:
+                    # Cleanup temporary mbox file
+                    if os.path.exists(tmp_mbox_path):
+                        os.unlink(tmp_mbox_path)
+                        
+        except Exception:
+            # Silently fall back to disk processing for large files
+            pass
+    
+    # Fallback: Large files or if memory processing fails
     # Save uploaded file to temporary location
     with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
     
     try:
-        # Extract and find mbox file
+        # Extract and find mbox file (now optimized)
         mbox_path = extract_and_find_mbox(tmp_path)
         
         if not mbox_path:
             raise ValueError("No .mbox file found in the uploaded ZIP")
         
-        # Parse the mbox file
-        df_emails = parse_mbox(mbox_path)
+        # Parse the mbox file with optional limit
+        df_emails = parse_mbox(mbox_path, max_emails=max_emails)
         
         # Clean the dataframe
         df_emails = clean_dataframe(df_emails)
@@ -174,3 +303,160 @@ def parse_uploaded_file(uploaded_file):
         # Cleanup temporary file
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+        # Cleanup extracted directory
+        extract_dir = "extracted_mbox"
+        if os.path.exists(extract_dir):
+            import shutil
+            shutil.rmtree(extract_dir)
+
+def parse_uploaded_file_with_filters(uploaded_file, filter_settings):
+    """
+    Parse uploaded ZIP file with intelligent filtering options.
+    
+    Args:
+        uploaded_file: Streamlit uploaded file object
+        filter_settings: Dict with filtering options
+    
+    Returns:
+        pandas.DataFrame: Filtered email data
+    """
+    import tempfile
+    import os
+    import io
+    from datetime import datetime
+    
+    # For small files, process in memory; for large files, use temp file
+    file_size = len(uploaded_file.getvalue())
+    
+    # Step 1: Extract and parse all emails first
+    if file_size < 50 * 1024 * 1024:  # Less than 50MB
+        try:
+            # Parse directly from memory
+            bytes_data = uploaded_file.getvalue()
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                tmp_file.write(bytes_data)
+                tmp_path = tmp_file.name
+            
+            # Extract and find mbox
+            mbox_path = extract_and_find_mbox(tmp_path, "extracted_mbox")
+            
+            if not mbox_path:
+                return pd.DataFrame()
+            
+            # Parse with high limit first, then filter
+            df_all = parse_mbox(mbox_path, max_emails=filter_settings.get("max_emails_limit", 500))
+            
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    else:
+        # Large file - use temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+        
+        try:
+            mbox_path = extract_and_find_mbox(tmp_path, "extracted_mbox")
+            if not mbox_path:
+                return pd.DataFrame()
+            
+            df_all = parse_mbox(mbox_path, max_emails=filter_settings.get("max_emails_limit", 500))
+            
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    
+    # Step 2: Apply intelligent filters
+    df_filtered = apply_email_filters(df_all, filter_settings)
+    
+    # Cleanup
+    extract_dir = "extracted_mbox"
+    if os.path.exists(extract_dir):
+        import shutil
+        shutil.rmtree(extract_dir)
+    
+    return df_filtered
+
+
+def apply_email_filters(df, filter_settings):
+    """
+    Apply intelligent filters to email DataFrame.
+    
+    Args:
+        df: DataFrame with parsed emails
+        filter_settings: Dict with filter options
+        
+    Returns:
+        pandas.DataFrame: Filtered emails
+    """
+    if df.empty:
+        return df
+    
+    original_count = len(df)
+    
+    # Filter 1: Date range
+    if filter_settings.get("use_date_filter") and filter_settings.get("start_date"):
+        start_date = pd.to_datetime(filter_settings["start_date"])
+        end_date = pd.to_datetime(filter_settings["end_date"])
+        
+        # Convert email dates to datetime
+        df['Date_parsed'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # Apply date filter
+        date_mask = (df['Date_parsed'] >= start_date) & (df['Date_parsed'] <= end_date)
+        df = df[date_mask]
+        print(f"📅 Date filter: {len(df)}/{original_count} emails")
+    
+    # Filter 2: Content length
+    min_length = filter_settings.get("min_content_length", 50)
+    if min_length > 0:
+        df['content_length'] = df['content'].fillna('').str.len()
+        df = df[df['content_length'] >= min_length]
+        print(f"📝 Content filter: {len(df)} emails with >{min_length} chars")
+    
+    # Filter 3: Keywords
+    keywords = filter_settings.get("keywords", [])
+    if keywords:
+        keywords = [k.strip().lower() for k in keywords if k.strip()]
+        if keywords:
+            # Create combined text for searching
+            df['searchable_text'] = (
+                df['Subject'].fillna('') + ' ' + 
+                df['content'].fillna('')
+            ).str.lower()
+            
+            # Check if any keyword is present
+            keyword_mask = df['searchable_text'].str.contains('|'.join(keywords), na=False)
+            df = df[keyword_mask]
+            print(f"🔍 Keyword filter: {len(df)} emails with keywords: {keywords}")
+    
+    # Filter 4: Exclude common low-value emails
+    exclude_types = filter_settings.get("exclude_types", [])
+    if exclude_types:
+        exclude_patterns = []
+        if "Notifications" in exclude_types:
+            exclude_patterns.extend(['notification', 'alert', 'reminder'])
+        if "Newsletters" in exclude_types:
+            exclude_patterns.extend(['newsletter', 'unsubscribe', 'marketing'])
+        if "Automated" in exclude_types:
+            exclude_patterns.extend(['noreply', 'no-reply', 'automated', 'system'])
+        
+        if exclude_patterns:
+            # Create searchable text from subject, from, and content
+            df['searchable_text'] = (
+                df['Subject'].fillna('') + ' ' + 
+                df['From'].fillna('') + ' ' + 
+                df['content'].fillna('')
+            ).str.lower()
+            
+            exclude_mask = df['searchable_text'].str.contains('|'.join(exclude_patterns), na=False, case=False)
+            df = df[~exclude_mask]  # Invert mask to exclude
+            print(f"🚫 Excluded {original_count - len(df)} low-value emails")
+    
+    # Clean up temporary columns
+    df = df.drop(columns=[col for col in ['Date_parsed', 'content_length', 'searchable_text'] 
+                         if col in df.columns])
+    
+    print(f"✅ Final result: {len(df)}/{original_count} emails after filtering")
+    return df

@@ -30,11 +30,14 @@ def load_index(path="faiss_index.idx"):
     return faiss.read_index(path)
 
 def embed_dataframe(df, content_col="content"):
-    df["chunks"] = df[content_col].apply(lambda x: chunk_text(x))
-    all_chunks = df["chunks"].explode().dropna().tolist()
+    # Create a copy to avoid SettingWithCopyWarning
+    df_copy = df.copy()
+    df_copy["chunks"] = df_copy[content_col].apply(lambda x: chunk_text(x))
+    all_chunks = df_copy["chunks"].explode().dropna().tolist()
     index, chunks = build_faiss_index(all_chunks)
     save_index(index)
     return index, chunks
+
 
 def retrieve_similar_chunks(query, index=None, chunks=None, k=3):
     if index is None:

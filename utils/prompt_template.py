@@ -113,10 +113,12 @@ Your task is to:
 
 {example_json}
 
-Guidelines:
-- Each email = one task.
-- Use double quotes.
-- Do not include markdown, backticks, or comments.
+CRITICAL JSON FORMATTING RULES:
+- Use double quotes for all strings
+- Add commas after every property except the last one
+- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2" 
+- Do not include markdown, backticks, or comments
+- Ensure all braces and brackets are properly closed
 
 Context:
 \"\"\"

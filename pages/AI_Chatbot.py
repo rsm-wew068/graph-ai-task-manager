@@ -4,6 +4,30 @@ from utils.langgraph_dag import run_agent_chat_round
 st.set_page_config(page_title="🤖 Ask the Task Agent", layout="wide")
 st.title("🤖 Ask the Task Agent")
 
+# Show data status
+if (hasattr(st.session_state, 'processing_complete') and
+        st.session_state.processing_complete):
+    outputs = st.session_state.get("extracted_tasks", [])
+    valid_tasks_count = len([
+        res for res in outputs
+        if "validated_json" in res and res.get("valid", False)
+    ])
+    st.success(
+        f"📊 Ready to answer questions about {valid_tasks_count} tasks "
+        f"from your processed emails"
+    )
+elif (hasattr(st.session_state, 'parsing_complete') and
+      st.session_state.parsing_complete):
+    st.warning(
+        "📁 Emails parsed but not yet processed with LLM. "
+        "Go to the main page to start LLM processing for Q&A."
+    )
+else:
+    st.info(
+        "📝 No data loaded yet. Please upload and process emails "
+        "from the main page first to enable Q&A."
+    )
+
 # Initialize chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
