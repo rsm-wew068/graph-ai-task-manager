@@ -90,11 +90,12 @@ extraction_workflow.set_finish_point(["write_graph", "fail"])
 
 extraction_app = extraction_workflow.compile()
 
-def run_extraction_pipeline(email_text, faiss_index, all_chunks):
+def run_extraction_pipeline(email_text, faiss_index, all_chunks, email_index):
     state = {
         "email_text": email_text,
         "faiss_index": faiss_index,
         "all_chunks": all_chunks,
+        "email_index": email_index,
         "retry_count": 0
     }
     return extraction_app.invoke(state)
