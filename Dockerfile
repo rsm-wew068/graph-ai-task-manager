@@ -10,9 +10,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
-COPY app.py ./
-
 RUN pip3 install -r requirements.txt langgraph
+
+# Copy all necessary files and directories
+COPY app.py ./
+COPY utils/ ./utils/
+COPY pages/ ./pages/
+COPY .streamlit/ ./.streamlit/
 
 EXPOSE 8501
 
