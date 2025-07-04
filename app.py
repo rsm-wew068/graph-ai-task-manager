@@ -1,18 +1,39 @@
 import sys
 import os
 
-# Fix for Hugging Face Spaces: ensure current directory is in Python path
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+# Robust path fix for Hugging Face Spaces and local development
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Also add parent directory for extra safety
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+# Debug: Print current working directory and Python path
+print(f"Current working directory: {os.getcwd()}")
+print(f"Script directory: {current_dir}")
+print(f"Python path: {sys.path[:3]}")  # First 3 entries
+print(f"Utils directory exists: {os.path.exists(os.path.join(current_dir, 'utils'))}")
+print(f"Utils __init__.py exists: {os.path.exists(os.path.join(current_dir, 'utils', '__init__.py'))}")
 
 import streamlit as st
 
-# Use relative imports from local utils package
-from utils.langgraph_dag import (
-    run_extraction_pipeline,
-    resume_extraction_pipeline_with_correction
-)
-from utils.email_parser import parse_uploaded_file_with_filters
-from utils.embedding import embed_dataframe
+# Try importing with error handling
+try:
+    from utils.langgraph_dag import (
+        run_extraction_pipeline,
+        resume_extraction_pipeline_with_correction
+    )
+    from utils.email_parser import parse_uploaded_file_with_filters
+    from utils.embedding import embed_dataframe
+    print("✅ Successfully imported utils modules")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    st.error(f"Import error: {e}")
+    st.error("Please ensure all utils files are properly uploaded to your Hugging Face Space")
+    st.stop()
 
 import pandas as pd
 import json

@@ -1,11 +1,24 @@
 import sys
 import os
 
-# Fix for Hugging Face Spaces: ensure parent directory is in Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Robust path fix for Hugging Face Spaces
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+print(f"AI_Chatbot - Parent directory: {parent_dir}")
+print(f"Utils directory exists: {os.path.exists(os.path.join(parent_dir, 'utils'))}")
 
 import streamlit as st
-from utils.langgraph_dag import run_agent_chat_round
+
+try:
+    from utils.langgraph_dag import run_agent_chat_round
+    print("✅ AI_Chatbot - Successfully imported utils")
+except ImportError as e:
+    print(f"❌ AI_Chatbot - Import error: {e}")
+    st.error(f"Import error: {e}")
+    st.stop()
 
 st.set_page_config(page_title="🤖 Ask the Task Agent", layout="wide")
 st.title("🤖 Ask the Task Agent")
