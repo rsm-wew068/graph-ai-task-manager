@@ -493,7 +493,7 @@ def extract_name_and_email(email_string):
 def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
     """
     Safe wrapper for parsing uploaded files with comprehensive error handling.
-    This function prevents 403 and other file access errors.
+    Optimized for Hugging Face Spaces environment.
     """
     if filter_settings is None:
         filter_settings = {}
@@ -506,43 +506,55 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
         if not uploaded_file.name.lower().endswith('.zip'):
             raise ValueError("File must be a ZIP archive (.zip)")
         
-        # Check file size
+        # Use Hugging Face Spaces-specific file handling
         try:
-            file_content = uploaded_file.getvalue()
-            if len(file_content) == 0:
-                raise ValueError("Uploaded file is empty")
-            
-            file_size_mb = len(file_content) / (1024 * 1024)
-            if file_size_mb > 500:  # 500MB limit
-                raise ValueError(f"File too large ({file_size_mb:.1f}MB). Please upload a smaller file.")
-                
+            tmp_path = handle_hf_spaces_upload(uploaded_file)
         except Exception as e:
-            if "403" in str(e) or "AxiosError" in str(e):
-                raise ValueError("File access denied. Try uploading the file again or use a different browser.")
-            raise ValueError(f"Cannot read uploaded file: {str(e)}")
+            raise ValueError(str(e))
         
-        # Reset file pointer and try parsing
-        uploaded_file.seek(0)
-        
-        # Call the original function with added error handling
+        # Parse using temporary file
         try:
-            return parse_uploaded_file_with_filters(uploaded_file, filter_settings)
+            # Create a file-like object for the existing parsing function
+            with open(tmp_path, 'rb') as f:
+                import io
+                uploaded_file_like = io.BytesIO(f.read())
+                uploaded_file_like.name = uploaded_file.name
+                
+                return parse_uploaded_file_with_filters(
+                    uploaded_file_like, filter_settings
+                )
         except Exception as parse_error:
             error_msg = str(parse_error)
             
-            # Handle specific error types
+            # Handle specific error types with HF Spaces context
             if "403" in error_msg or "AxiosError" in error_msg:
-                raise ValueError("File access error (403). This may be due to:\n"
-                               "- Browser security restrictions\n"
-                               "- File permissions\n"
-                               "- Network connectivity issues\n"
-                               "Please try refreshing the page and uploading again.")
+                raise ValueError(
+                    "🚫 Hugging Face Spaces file access error (403). Try:\n"
+                    "• Wait 30 seconds and upload again\n"
+                    "• Refresh the page (F5)\n"
+                    "• Use a smaller file (under 50MB)\n"
+                    "• Try Chrome or Firefox browser"
+                )
             elif "BadZipFile" in error_msg or "zipfile" in error_msg.lower():
-                raise ValueError("Invalid ZIP file. Please ensure you uploaded a valid Gmail Takeout ZIP file.")
+                raise ValueError(
+                    "Invalid ZIP file. Please ensure you uploaded a valid "
+                    "Gmail Takeout ZIP file."
+                )
             elif "mbox" in error_msg.lower():
-                raise ValueError("No email data found. Please ensure you uploaded a Gmail Takeout file that contains emails.")
+                raise ValueError(
+                    "No email data found. Please ensure you uploaded a "
+                    "Gmail Takeout file that contains emails."
+                )
             else:
                 raise ValueError(f"Email parsing failed: {error_msg}")
+        finally:
+            # Cleanup temporary file
+            try:
+                import os
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except Exception:
+                pass  # Ignore cleanup errors
                 
     except ValueError:
         # Re-raise ValueError as-is (these are user-friendly messages)
@@ -551,10 +563,84 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
         # Catch any other unexpected errors
         error_msg = str(e)
         if "403" in error_msg or "AxiosError" in error_msg:
-            raise ValueError("File access denied (403 error). Please try:\n"
-                           "1. Refreshing the page\n"
-                           "2. Using a different browser\n"
-                           "3. Uploading the file again\n"
-                           "4. Checking your internet connection")
+            raise ValueError(
+                "🚫 Hugging Face Spaces error (403). Please try:\n"
+                "• Refreshing the page and uploading again\n"
+                "• Using a smaller file (under 50MB)\n"
+                "• Trying a different browser"
+            )
         else:
             raise ValueError(f"Unexpected error: {error_msg}")
+
+def handle_hf_spaces_upload(uploaded_file):
+    """
+    Handle file uploads specifically for Hugging Face Spaces environment.
+    This function addresses common 403 errors and permission issues.
+    """
+    import time
+    import tempfile
+    
+    max_retries = 3
+    retry_delay = 1
+    
+    for attempt in range(max_retries):
+        try:
+            # Reset file pointer
+            uploaded_file.seek(0)
+            
+            # Read file content with error handling
+            try:
+                file_content = uploaded_file.getvalue()
+            except Exception as e:
+                if "403" in str(e) or "AxiosError" in str(e):
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        raise ValueError(
+                            "🚫 Hugging Face Spaces upload error. Please:\n"
+                            "• Try a smaller file (under 50MB)\n"
+                            "• Refresh the page and try again\n"
+                            "• Use Chrome or Firefox browser"
+                        )
+                raise e
+            
+            # Validate file content
+            if len(file_content) == 0:
+                raise ValueError("Uploaded file is empty")
+            
+            file_size_mb = len(file_content) / (1024 * 1024)
+            if file_size_mb > 50:  # Conservative limit for HF Spaces
+                raise ValueError(
+                    f"File too large ({file_size_mb:.1f}MB). "
+                    f"Hugging Face Spaces works best with files under 50MB."
+                )
+            
+            # Create temporary file in a safer way for HF Spaces
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, 
+                    suffix='.zip',
+                    dir=tempfile.gettempdir()
+                ) as tmp_file:
+                    tmp_file.write(file_content)
+                    return tmp_file.name
+            except Exception as e:
+                raise ValueError(
+                    f"Cannot create temporary file in Hugging Face Spaces: {e}"
+                )
+                
+        except ValueError:
+            raise  # Re-raise user-friendly errors
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                raise ValueError(
+                    f"Hugging Face Spaces file processing error: {e}"
+                )
+    
+    raise ValueError("Failed to process file after multiple attempts")
