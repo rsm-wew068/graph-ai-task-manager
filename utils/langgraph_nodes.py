@@ -1,7 +1,15 @@
 import os
 from datetime import datetime
 from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
+
+# Handle dotenv import gracefully for deployment environments
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, environment variables should be set directly
+    pass
+
 from utils.prompt_template import rag_extraction_prompt, reason_prompt
 from utils.embedding import retrieve_similar_chunks
 from utils.graph_writer import write_tasks_to_graph
@@ -10,7 +18,6 @@ import re
 import json
 from typing import Dict, Any
 
-load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 
 def get_llm():
