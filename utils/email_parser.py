@@ -489,3 +489,72 @@ def extract_name_and_email(email_string):
     except Exception:
         # Fallback - return the original string as email
         return "Unknown", email_string or ""
+
+def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
+    """
+    Safe wrapper for parsing uploaded files with comprehensive error handling.
+    This function prevents 403 and other file access errors.
+    """
+    if filter_settings is None:
+        filter_settings = {}
+    
+    try:
+        # Validate uploaded file
+        if uploaded_file is None:
+            raise ValueError("No file uploaded")
+        
+        if not uploaded_file.name.lower().endswith('.zip'):
+            raise ValueError("File must be a ZIP archive (.zip)")
+        
+        # Check file size
+        try:
+            file_content = uploaded_file.getvalue()
+            if len(file_content) == 0:
+                raise ValueError("Uploaded file is empty")
+            
+            file_size_mb = len(file_content) / (1024 * 1024)
+            if file_size_mb > 500:  # 500MB limit
+                raise ValueError(f"File too large ({file_size_mb:.1f}MB). Please upload a smaller file.")
+                
+        except Exception as e:
+            if "403" in str(e) or "AxiosError" in str(e):
+                raise ValueError("File access denied. Try uploading the file again or use a different browser.")
+            raise ValueError(f"Cannot read uploaded file: {str(e)}")
+        
+        # Reset file pointer and try parsing
+        uploaded_file.seek(0)
+        
+        # Call the original function with added error handling
+        try:
+            return parse_uploaded_file_with_filters(uploaded_file, filter_settings)
+        except Exception as parse_error:
+            error_msg = str(parse_error)
+            
+            # Handle specific error types
+            if "403" in error_msg or "AxiosError" in error_msg:
+                raise ValueError("File access error (403). This may be due to:\n"
+                               "- Browser security restrictions\n"
+                               "- File permissions\n"
+                               "- Network connectivity issues\n"
+                               "Please try refreshing the page and uploading again.")
+            elif "BadZipFile" in error_msg or "zipfile" in error_msg.lower():
+                raise ValueError("Invalid ZIP file. Please ensure you uploaded a valid Gmail Takeout ZIP file.")
+            elif "mbox" in error_msg.lower():
+                raise ValueError("No email data found. Please ensure you uploaded a Gmail Takeout file that contains emails.")
+            else:
+                raise ValueError(f"Email parsing failed: {error_msg}")
+                
+    except ValueError:
+        # Re-raise ValueError as-is (these are user-friendly messages)
+        raise
+    except Exception as e:
+        # Catch any other unexpected errors
+        error_msg = str(e)
+        if "403" in error_msg or "AxiosError" in error_msg:
+            raise ValueError("File access denied (403 error). Please try:\n"
+                           "1. Refreshing the page\n"
+                           "2. Using a different browser\n"
+                           "3. Uploading the file again\n"
+                           "4. Checking your internet connection")
+        else:
+            raise ValueError(f"Unexpected error: {error_msg}")

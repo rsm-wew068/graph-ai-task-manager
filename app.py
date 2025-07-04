@@ -26,7 +26,7 @@ try:
         run_extraction_pipeline,
         resume_extraction_pipeline_with_correction
     )
-    from utils.email_parser import parse_uploaded_file_with_filters
+    from utils.email_parser import parse_uploaded_file_with_filters_safe
     from utils.embedding import embed_dataframe
     print("✅ Successfully imported utils modules")
 except ImportError as e:
@@ -251,7 +251,7 @@ if uploaded_file is not None:
     if st.button("📊 Parse Emails with Filters"):
         with st.spinner("Parsing emails with smart filters..."):
             try:
-                df_emails = parse_uploaded_file_with_filters(
+                df_emails = parse_uploaded_file_with_filters_safe(
                     uploaded_file, filter_settings
                 )
                 st.session_state.parsed_emails = df_emails
