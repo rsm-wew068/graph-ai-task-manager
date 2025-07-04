@@ -95,7 +95,9 @@ def write_tasks_to_graph(data, save_path=None):
 
                 collab_role_name = f"{c_role} ({c_dept})"
                 G.add_node(c_name, label="Person", name=c_name)
-                G.add_node(collab_role_name, label="Role", name=collab_role_name)
+                G.add_node(
+                    collab_role_name, label="Role", name=collab_role_name
+                )
                 G.add_node(c_dept, label="Department", name=c_dept)
                 G.add_edge(tname, c_name, label="COLLABORATED_BY")
                 G.add_edge(c_name, collab_role_name, label="HAS_ROLE")
