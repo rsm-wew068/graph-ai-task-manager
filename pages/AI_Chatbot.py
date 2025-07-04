@@ -1,3 +1,8 @@
+import sys
+import os
+# Add current directory to Python path for Hugging Face deployment
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
 from utils.langgraph_dag import run_agent_chat_round
 

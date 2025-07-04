@@ -9,6 +9,7 @@ import re
 import mailbox
 from email.utils import parsedate_to_datetime
 import zipfile
+from email.utils import parseaddr
 
 def get_text_from_mbox_email(msg):
     """Extract plain text from mbox email message."""
@@ -53,18 +54,25 @@ def parse_mbox(mbox_path, max_emails=None):
                 except (ValueError, TypeError):
                     # Skip complex fallback parsing for speed
                     pass
+            # Extract names and emails properly
+            from_name, from_email = extract_name_and_email(msg.get("From"))
+            to_name, to_email = extract_name_and_email(msg.get("To"))
+            cc_name, cc_email = extract_name_and_email(msg.get("Cc"))
+            bcc_name, bcc_email = extract_name_and_email(msg.get("Bcc"))
             
             email_data = {
                 "Message-ID": msg.get("Message-ID"),
                 "Date": parsed_date,
-                "From": msg.get("From"),
-                "To": msg.get("To"),
+                "From": from_email,
+                "To": to_email,
+                "Cc": cc_email,
+                "Bcc": bcc_email,
+                "Name-From": from_name,
+                "Name-To": to_name,
+                "Name-Cc": cc_name,
+                "Name-Bcc": bcc_name,
                 "Subject": msg.get("Subject"),
                 "content": get_text_from_mbox_email(msg),
-                "X-From": msg.get("From"),
-                "X-To": msg.get("To"),
-                "X-cc": msg.get("Cc"),
-                "X-bcc": msg.get("Bcc"),
             }
             emails.append(email_data)
             processed_count += 1
@@ -201,24 +209,11 @@ def clean_dataframe(df_emails):
     if existing_columns:
         df_emails = df_emails.drop(columns=existing_columns)
 
-    # Extract display names (only if columns exist)
-    if 'X-From' in df_emails.columns:
-        df_emails['Name-From'] = df_emails['X-From'].apply(extract_display_name)
-    if 'X-To' in df_emails.columns:
-        df_emails['Name-To'] = df_emails['X-To'].apply(extract_display_name)
-    if 'X-cc' in df_emails.columns:
-        df_emails['Name-cc'] = df_emails['X-cc'].apply(extract_display_name)
-    if 'X-bcc' in df_emails.columns:
-        df_emails['Name-bcc'] = df_emails['X-bcc'].apply(extract_display_name)
+    # Names are already extracted during parsing, no need for additional processing
+    print(f"✅ Email processing complete: {len(df_emails)} emails with names extracted")
 
     # Clean email content
     df_emails['content'] = df_emails['content'].apply(clean_email_body)
-
-    # Drop X-columns that exist
-    x_columns_to_drop = ['X-From', 'X-To', 'X-cc', 'X-bcc']
-    existing_x_columns = [col for col in x_columns_to_drop if col in df_emails.columns]
-    if existing_x_columns:
-        df_emails = df_emails.drop(columns=existing_x_columns)
 
     # Convert date to date only
     df_emails['Date'] = pd.to_datetime(df_emails['Date'])
@@ -460,3 +455,37 @@ def apply_email_filters(df, filter_settings):
     
     print(f"✅ Final result: {len(df)}/{original_count} emails after filtering")
     return df
+
+def extract_name_and_email(email_string):
+    """
+    Extract display name and email address from email header.
+    
+    Args:
+        email_string: Raw email header like 'John Doe <john@example.com>'
+        
+    Returns:
+        tuple: (display_name, email_address)
+    """
+    if not email_string:
+        return "", ""
+    
+    try:
+        # Use email.utils.parseaddr for proper parsing
+        name, email = parseaddr(email_string)
+        
+        # Clean up the name - remove quotes and extra whitespace
+        if name:
+            name = name.strip('"').strip("'").strip()
+        
+        # If no name was found, try to extract from email
+        if not name and email:
+            # Try to get name from email prefix (before @)
+            local_part = email.split('@')[0] if '@' in email else email
+            # Convert dots/underscores to spaces and title case
+            name = local_part.replace('.', ' ').replace('_', ' ').title()
+        
+        return name or "Unknown", email or ""
+        
+    except Exception:
+        # Fallback - return the original string as email
+        return "Unknown", email_string or ""
