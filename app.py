@@ -1,16 +1,19 @@
 import sys
 import os
 
-# Fix for Hugging Face Spaces: ensure local directory is in module search path
+# Fix for Hugging Face Spaces: ensure current directory is in Python path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 import streamlit as st
+
+# Use relative imports from local utils package
 from utils.langgraph_dag import (
     run_extraction_pipeline,
     resume_extraction_pipeline_with_correction
 )
 from utils.email_parser import parse_uploaded_file_with_filters
 from utils.embedding import embed_dataframe
+
 import pandas as pd
 import json
 
