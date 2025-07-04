@@ -1,7 +1,8 @@
 import sys
 import os
-# Add current directory to Python path for Hugging Face deployment
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Fix for Hugging Face Spaces: ensure parent directory is in module search path  
+sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 import streamlit as st
 import pandas as pd
