@@ -79,19 +79,9 @@ def attempt_json_parse_node(state):
         parsed = json.loads(extracted)
         
         # Basic validation - check if it has expected structure
-        # Check for fields at root level OR nested in Topic
-        has_valid_structure = False
-        if isinstance(parsed, dict):
-            # Check root level fields
-            if "name" in parsed or "deliverable" in parsed or "task" in parsed:
-                has_valid_structure = True
-            # Check nested Topic structure
-            elif "Topic" in parsed and isinstance(parsed["Topic"], dict):
-                topic = parsed["Topic"]
-                if "name" in topic or "tasks" in topic:
-                    has_valid_structure = True
-        
-        if has_valid_structure:
+        if isinstance(parsed, dict) and (
+            "name" in parsed or "deliverable" in parsed or "task" in parsed
+        ):
             return {
                 "validated_json": parsed,
                 "valid": True,
@@ -114,7 +104,6 @@ def attempt_json_parse_node(state):
             "status": "json_parse_error",
             **state
         }
-
 
 def pause_for_user_review_node(state):
     """This node represents a pause - returns state for UI handling."""
