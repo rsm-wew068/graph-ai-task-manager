@@ -176,9 +176,9 @@ st.markdown("""
 """)
 
 uploaded_file = st.file_uploader(
-    "Upload your Inbox.mbox file (extracted from Gmail Takeout)",
+    "Upload your Inbox.mbox file (any size - we'll process first 200MB)",
     type=["mbox"],
-    help="First extract your Gmail Takeout ZIP, then upload the Inbox.mbox file directly."
+    help="Extract Gmail Takeout ZIP, then upload Inbox.mbox (any size file accepted)."
 )
 
 if uploaded_file is not None:
@@ -186,8 +186,8 @@ if uploaded_file is not None:
     
     # Show helpful info about the new parsing approach
     st.info(
-        "📋 **Simplified approach**: Upload your Inbox.mbox file directly! "
-        "We process the first 200MB for better performance and reliability."
+        "📋 **Smart file handling**: Upload any size Inbox.mbox file! "
+        "We automatically process the first 200MB for optimal performance."
     )
     
     # Intelligent Email Filtering
@@ -238,7 +238,7 @@ if uploaded_file is not None:
             max_emails_limit = st.number_input(
                 "Max emails (safety limit)",
                 min_value=10, max_value=5000, value=2000,
-                help="Maximum emails to parse from Inbox.mbox (we process first 200MB)"
+                help="Maximum emails to parse (we auto-limit to first 200MB of file)"
             )
         with col_adv2:
             exclude_types = st.multiselect(
