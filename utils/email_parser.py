@@ -1,50 +1,50 @@
-# %% [markdown]
-# # Load Data
+# Utils package for automated task manager
 
-# %%
 import os
 import pandas as pd
 import re
-# --- Gmail Takeout .mbox loader fallback ---
 import mailbox
 from email.utils import parsedate_to_datetime
-import zipfile
 from email.utils import parseaddr
 
-def get_text_from_mbox_email(msg):
-    """Extract plain text from mbox email message."""
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            if content_type == 'text/plain':
-                try:
-                    return part.get_payload(decode=True).decode(part.get_content_charset('utf-8'), errors='replace')
-                except:
-                    continue
-    else:
-        try:
-            return msg.get_payload(decode=True).decode(msg.get_content_charset('utf-8'), errors='replace')
-        except:
-            return msg.get_payload()
-    return ""
 
-def parse_mbox(mbox_path, max_emails=None):
-    """Parse mbox file with early termination at limit."""
+def parse_inbox_mbox(mbox_path: str, max_bytes: int = 200 * 1024 * 1024, max_emails: int = 2000):
+    """
+    Parse the Inbox.mbox file and yield emails until total read bytes exceeds max_bytes.
+    
+    Args:
+        mbox_path: Path to the Inbox.mbox file
+        max_bytes: Maximum bytes to read (default 200MB)
+        max_emails: Maximum number of emails to process
+        
+    Returns:
+        pandas.DataFrame: Parsed email data
+    """
+    if not os.path.exists(mbox_path):
+        raise FileNotFoundError(f"Inbox.mbox not found at: {mbox_path}")
+
     mbox = mailbox.mbox(mbox_path)
     emails = []
+    read_bytes = 0
     processed_count = 0
-    
-    # Set a reasonable default if no limit specified
-    if max_emails is None:
-        max_emails = 100  # Default limit to prevent huge processing
-    
+
     for msg in mbox:
-        # Stop immediately when we hit the limit
-        if processed_count >= max_emails:
+        # Stop if we've hit our limits
+        if processed_count >= max_emails or read_bytes > max_bytes:
             break
             
         try:
-            # Simplified date parsing - less fallback for speed
+            # Calculate message size
+            raw_bytes = str(msg).encode("utf-8")
+            msg_size = len(raw_bytes)
+            
+            # Check if adding this message would exceed our limit
+            if read_bytes + msg_size > max_bytes:
+                break
+                
+            read_bytes += msg_size
+
+            # Parse date
             date_str = msg.get("Date")
             parsed_date = "1970-01-01T00:00:00"  # Default fallback
             
@@ -52,14 +52,17 @@ def parse_mbox(mbox_path, max_emails=None):
                 try:
                     parsed_date = parsedate_to_datetime(date_str).isoformat()
                 except (ValueError, TypeError):
-                    # Skip complex fallback parsing for speed
                     pass
+
             # Extract names and emails properly
             from_name, from_email = extract_name_and_email(msg.get("From"))
             to_name, to_email = extract_name_and_email(msg.get("To"))
             cc_name, cc_email = extract_name_and_email(msg.get("Cc"))
             bcc_name, bcc_email = extract_name_and_email(msg.get("Bcc"))
-            
+
+            # Get email body
+            body = get_text_from_mbox_email(msg)
+
             email_data = {
                 "Message-ID": msg.get("Message-ID"),
                 "Date": parsed_date,
@@ -72,104 +75,73 @@ def parse_mbox(mbox_path, max_emails=None):
                 "Name-Cc": cc_name,
                 "Name-Bcc": bcc_name,
                 "Subject": msg.get("Subject"),
-                "content": get_text_from_mbox_email(msg),
+                "content": body,
             }
             emails.append(email_data)
             processed_count += 1
-            
-        except Exception:
-            # Still count failed emails toward the limit to avoid infinite loops
+
+        except Exception as e:
             processed_count += 1
-            continue
-    
-    print(f"Parsed {len(emails)} emails (limit: {max_emails})")
+            continue  # Skip problematic emails
+
+    print(f"Parsed {len(emails)} emails (read {read_bytes / (1024*1024):.1f}MB, limit: {max_bytes / (1024*1024):.0f}MB)")
     return pd.DataFrame(emails)
 
-def extract_and_find_mbox(zip_path, extract_to="extracted_mbox"):
-    """Find mbox file in ZIP without extracting everything."""
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        # First, just list files to find .mbox without extracting
-        for file_info in zip_ref.filelist:
-            if file_info.filename.endswith(".mbox"):
-                # Extract only the .mbox file
-                zip_ref.extract(file_info.filename, extract_to)
-                return os.path.join(extract_to, file_info.filename)
-    
-    raise FileNotFoundError("No .mbox file found in uploaded Gmail ZIP.")
-
-# Example usage (only run when script is executed directly)
-if __name__ == "__main__":
-    # Use Gmail .zip archive if present, else raise error
-    zip_path = "takeout.zip"
-    if os.path.exists(zip_path):
-        extracted_mbox_path = extract_and_find_mbox(zip_path)
-        df_emails = parse_mbox(extracted_mbox_path)
-        print(df_emails.shape)
-        print(df_emails.head())
+def get_text_from_mbox_email(msg):
+    """Extract plain text from mbox email message."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            if content_type == 'text/plain':
+                try:
+                    return part.get_payload(decode=True).decode(
+                        part.get_content_charset('utf-8'), errors='replace'
+                    )
+                except Exception:
+                    continue
     else:
-        print(f"No takeout.zip file found at {zip_path}")
-        print("Use the functions extract_and_find_mbox() and parse_mbox() "
-              "directly with your ZIP file path.")
+        try:
+            return msg.get_payload(decode=True).decode(
+                msg.get_content_charset('utf-8'), errors='replace'
+            )
+        except Exception:
+            return msg.get_payload()
+    return ""
 
-# %% [markdown]
-# # Clean Data
 
-
-def extract_display_name(x):
-    """Extract and clean display name from email address string."""
-    if not isinstance(x, str):
-        return ""
+def extract_name_and_email(email_string):
+    """
+    Extract display name and email address from email header.
     
-    # Handle multiple email addresses separated by commas
-    if ',' in x and '@' in x.split(',')[0] and '@' in x.split(',')[1]:
-        # Multiple emails - take the first one
-        x = x.split(',')[0].strip()
+    Args:
+        email_string: Raw email header like 'John Doe <john@example.com>'
+        
+    Returns:
+        tuple: (display_name, email_address)
+    """
+    if not email_string:
+        return "", ""
     
-    # Extract name part before < or @
-    match = re.match(r"^([^<@]+)", x)
-    if match:
-        name = match.group(1).strip()
-    else:
-        # Fallback: try to extract from angle brackets
-        angle_match = re.search(r'"?([^"<>]+)"?\s*<', x)
-        if angle_match:
-            name = angle_match.group(1).strip()
-        else:
-            name = x.strip()
-    
-    # Clean formatting symbols and quotes
-    name = re.sub(r'^["\']|["\']$', '', name)  # Remove surrounding quotes
-    name = re.sub(r'[<>]', '', name)  # Remove angle brackets
-    # Clean extra quotes/spaces
-    name = re.sub(r'^\s*["\']*\s*|\s*["\']*\s*$', '', name)
-    
-    # Keep letters, spaces, hyphens, periods, commas, apostrophes
-    name = re.sub(r'[^\w\s\-\.,\']+', '', name)
-    name = re.sub(r'\s+', ' ', name)  # Normalize whitespace
-    name = name.strip()
-    
-    # Handle "Last, First" format
-    if ',' in name and '@' not in name:
-        parts = [p.strip() for p in name.split(',')]
-        if len(parts) == 2 and len(parts[0]) > 0 and len(parts[1]) > 0:
-            # Only flip if both parts look like names (not email-like)
-            part0_clean = not re.search(r'[@\.]', parts[0])
-            part1_clean = not re.search(r'[@\.]', parts[1])
-            if part0_clean and part1_clean:
-                return f"{parts[1]} {parts[0]}"
-    
-    # If result is empty or looks like an email, try to extract from original
-    if not name or '@' in name:
-        # Try to extract from email address username
-        email_match = re.search(r'([^@<>\s]+)@', x)
-        if email_match:
-            username = email_match.group(1)
-            # Convert common username patterns to readable names
-            username = re.sub(r'[._-]', ' ', username)
-            username = username.title()
-            return username if username else "Unknown"
-    
-    return name if name else "Unknown"
+    try:
+        # Use email.utils.parseaddr for proper parsing
+        name, email = parseaddr(email_string)
+        
+        # Clean up the name - remove quotes and extra whitespace
+        if name:
+            name = name.strip('"').strip("'").strip()
+        
+        # If no name was found, try to extract from email
+        if not name and email:
+            # Try to get name from email prefix (before @)
+            local_part = email.split('@')[0] if '@' in email else email
+            # Convert dots/underscores to spaces and title case
+            name = local_part.replace('.', ' ').replace('_', ' ').title()
+        
+        return name or "Unknown", email or ""
+        
+    except Exception:
+        # Fallback - return the original string as email
+        return "Unknown", email_string or ""
 
 
 def clean_email_body(text):
@@ -182,196 +154,6 @@ def clean_email_body(text):
     # optional: remove weird characters
     text = re.sub(r'[^a-zA-Z0-9.,!?$%:;/@#\'\"()\- ]', '', text)
     return text.strip()
-
-
-def clean_dataframe(df_emails):
-    """Clean the email dataframe with various transformations."""
-    # Step 1: Filter out emails with None dates first
-    df_emails = df_emails.dropna(subset=['Date'])
-    
-    # Step 2: Clean timezone labels (only for string dates)
-    if df_emails['Date'].dtype == 'object':
-        df_emails['clean_date'] = df_emails['Date'].str.replace(
-            r'\s+\(.*\)', '', regex=True)
-    else:
-        df_emails['clean_date'] = df_emails['Date']
-
-    # Step 3: Parse datetime safely & force conversion
-    df_emails['Date'] = pd.to_datetime(
-        df_emails['clean_date'], errors='coerce', utc=True)
-    
-    # Step 4: Drop any rows where date parsing failed
-    df_emails = df_emails.dropna(subset=['Date'])
-
-    # Drop columns that exist
-    columns_to_drop = ['Mime-Version', 'Content-Type', 'Content-Transfer-Encoding', 'clean_date']
-    existing_columns = [col for col in columns_to_drop if col in df_emails.columns]
-    if existing_columns:
-        df_emails = df_emails.drop(columns=existing_columns)
-
-    # Names are already extracted during parsing, no need for additional processing
-    print(f"✅ Email processing complete: {len(df_emails)} emails with names extracted")
-
-    # Clean email content
-    df_emails['content'] = df_emails['content'].apply(clean_email_body)
-
-    # Convert date to date only
-    df_emails['Date'] = pd.to_datetime(df_emails['Date'])
-    df_emails['Date'] = df_emails['Date'].dt.date
-
-    return df_emails
-
-def parse_uploaded_file(uploaded_file, max_emails=None):
-    """Parse an uploaded ZIP file containing .mbox data efficiently."""
-    import tempfile
-    import os
-    import io
-    
-    # For small files, process in memory; for large files, use temp file
-    file_size = len(uploaded_file.getvalue())
-    
-    if file_size < 50 * 1024 * 1024:  # Less than 50MB - process in memory
-        try:
-            # Parse directly from memory
-            zip_bytes = io.BytesIO(uploaded_file.getvalue())
-            with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
-                # Find .mbox file
-                mbox_filename = None
-                for file_info in zip_ref.filelist:
-                    if file_info.filename.endswith(".mbox"):
-                        mbox_filename = file_info.filename
-                        break
-                
-                if not mbox_filename:
-                    raise ValueError("No .mbox file found in the uploaded ZIP")
-                
-                # Extract .mbox content to memory
-                with zip_ref.open(mbox_filename) as mbox_file:
-                    # Create temporary file for mbox content only
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix='.mbox'
-                    ) as tmp_mbox:
-                        tmp_mbox.write(mbox_file.read())
-                        tmp_mbox_path = tmp_mbox.name
-                
-                try:
-                    # Parse the mbox file with optional limit
-                    df_emails = parse_mbox(
-                        tmp_mbox_path, max_emails=max_emails
-                    )
-                    
-                    # Clean the dataframe
-                    df_emails = clean_dataframe(df_emails)
-                    
-                    return df_emails
-                finally:
-                    # Cleanup temporary mbox file
-                    if os.path.exists(tmp_mbox_path):
-                        os.unlink(tmp_mbox_path)
-                        
-        except Exception:
-            # Silently fall back to disk processing for large files
-            pass
-    
-    # Fallback: Large files or if memory processing fails
-    # Save uploaded file to temporary location
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
-    
-    try:
-        # Extract and find mbox file (now optimized)
-        mbox_path = extract_and_find_mbox(tmp_path)
-        
-        if not mbox_path:
-            raise ValueError("No .mbox file found in the uploaded ZIP")
-        
-        # Parse the mbox file with optional limit
-        df_emails = parse_mbox(mbox_path, max_emails=max_emails)
-        
-        # Clean the dataframe
-        df_emails = clean_dataframe(df_emails)
-        
-        return df_emails
-    
-    finally:
-        # Cleanup temporary file
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        # Cleanup extracted directory
-        extract_dir = "extracted_mbox"
-        if os.path.exists(extract_dir):
-            import shutil
-            shutil.rmtree(extract_dir)
-
-def parse_uploaded_file_with_filters(uploaded_file, filter_settings):
-    """
-    Parse uploaded ZIP file with intelligent filtering options.
-    
-    Args:
-        uploaded_file: Streamlit uploaded file object
-        filter_settings: Dict with filtering options
-    
-    Returns:
-        pandas.DataFrame: Filtered email data
-    """
-    import tempfile
-    import os
-    import io
-    from datetime import datetime
-    
-    # For small files, process in memory; for large files, use temp file
-    file_size = len(uploaded_file.getvalue())
-    
-    # Step 1: Extract and parse all emails first
-    if file_size < 50 * 1024 * 1024:  # Less than 50MB
-        try:
-            # Parse directly from memory
-            bytes_data = uploaded_file.getvalue()
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-                tmp_file.write(bytes_data)
-                tmp_path = tmp_file.name
-            
-            # Extract and find mbox
-            mbox_path = extract_and_find_mbox(tmp_path, "extracted_mbox")
-            
-            if not mbox_path:
-                return pd.DataFrame()
-            
-            # Parse with high limit first, then filter
-            df_all = parse_mbox(mbox_path, max_emails=filter_settings.get("max_emails_limit", 500))
-            
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-    else:
-        # Large file - use temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
-        
-        try:
-            mbox_path = extract_and_find_mbox(tmp_path, "extracted_mbox")
-            if not mbox_path:
-                return pd.DataFrame()
-            
-            df_all = parse_mbox(mbox_path, max_emails=filter_settings.get("max_emails_limit", 500))
-            
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-    
-    # Step 2: Apply intelligent filters
-    df_filtered = apply_email_filters(df_all, filter_settings)
-    
-    # Cleanup
-    extract_dir = "extracted_mbox"
-    if os.path.exists(extract_dir):
-        import shutil
-        shutil.rmtree(extract_dir)
-    
-    return df_filtered
 
 
 def apply_email_filters(df, filter_settings):
@@ -422,7 +204,9 @@ def apply_email_filters(df, filter_settings):
             ).str.lower()
             
             # Check if any keyword is present
-            keyword_mask = df['searchable_text'].str.contains('|'.join(keywords), na=False)
+            keyword_mask = df['searchable_text'].str.contains(
+                '|'.join(keywords), na=False
+            )
             df = df[keyword_mask]
             print(f"🔍 Keyword filter: {len(df)} emails with keywords: {keywords}")
     
@@ -445,55 +229,26 @@ def apply_email_filters(df, filter_settings):
                 df['content'].fillna('')
             ).str.lower()
             
-            exclude_mask = df['searchable_text'].str.contains('|'.join(exclude_patterns), na=False, case=False)
+            exclude_mask = df['searchable_text'].str.contains(
+                '|'.join(exclude_patterns), na=False, case=False
+            )
             df = df[~exclude_mask]  # Invert mask to exclude
             print(f"🚫 Excluded {original_count - len(df)} low-value emails")
     
     # Clean up temporary columns
-    df = df.drop(columns=[col for col in ['Date_parsed', 'content_length', 'searchable_text'] 
-                         if col in df.columns])
+    df = df.drop(columns=[
+        col for col in ['Date_parsed', 'content_length', 'searchable_text'] 
+        if col in df.columns
+    ])
     
     print(f"✅ Final result: {len(df)}/{original_count} emails after filtering")
     return df
 
-def extract_name_and_email(email_string):
-    """
-    Extract display name and email address from email header.
-    
-    Args:
-        email_string: Raw email header like 'John Doe <john@example.com>'
-        
-    Returns:
-        tuple: (display_name, email_address)
-    """
-    if not email_string:
-        return "", ""
-    
-    try:
-        # Use email.utils.parseaddr for proper parsing
-        name, email = parseaddr(email_string)
-        
-        # Clean up the name - remove quotes and extra whitespace
-        if name:
-            name = name.strip('"').strip("'").strip()
-        
-        # If no name was found, try to extract from email
-        if not name and email:
-            # Try to get name from email prefix (before @)
-            local_part = email.split('@')[0] if '@' in email else email
-            # Convert dots/underscores to spaces and title case
-            name = local_part.replace('.', ' ').replace('_', ' ').title()
-        
-        return name or "Unknown", email or ""
-        
-    except Exception:
-        # Fallback - return the original string as email
-        return "Unknown", email_string or ""
 
 def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
     """
-    Safe wrapper for parsing uploaded files with comprehensive error handling.
-    Optimized for Hugging Face Spaces environment.
+    Parse uploaded Inbox.mbox file with comprehensive error handling.
+    Now expects users to upload the Inbox.mbox file directly (no ZIP).
     """
     if filter_settings is None:
         filter_settings = {}
@@ -503,144 +258,53 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
         if uploaded_file is None:
             raise ValueError("No file uploaded")
         
-        if not uploaded_file.name.lower().endswith('.zip'):
-            raise ValueError("File must be a ZIP archive (.zip)")
+        if not uploaded_file.name.lower().endswith('.mbox'):
+            raise ValueError(
+                "❌ Please upload an Inbox.mbox file directly.\n\n"
+                "Steps to get the file:\n"
+                "1. Download your Gmail Takeout ZIP file\n"
+                "2. Extract/unzip the file on your computer\n"
+                "3. Find and upload the 'Inbox.mbox' file\n"
+                "4. The file should be located in: Takeout/Mail/Inbox.mbox"
+            )
         
-        # Use Hugging Face Spaces-specific file handling
-        try:
-            tmp_path = handle_hf_spaces_upload(uploaded_file)
-        except Exception as e:
-            raise ValueError(str(e))
-        
-        # Parse using temporary file
-        try:
-            # Create a file-like object for the existing parsing function
-            with open(tmp_path, 'rb') as f:
-                import io
-                uploaded_file_like = io.BytesIO(f.read())
-                uploaded_file_like.name = uploaded_file.name
-                
-                return parse_uploaded_file_with_filters(
-                    uploaded_file_like, filter_settings
-                )
-        except Exception as parse_error:
-            error_msg = str(parse_error)
+        # Save uploaded file temporarily
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mbox') as tmp_file:
+            uploaded_file.seek(0)
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_file.flush()
             
-            # Handle specific error types with HF Spaces context
-            if "403" in error_msg or "AxiosError" in error_msg:
-                raise ValueError(
-                    "🚫 Hugging Face Spaces file access error (403). Try:\n"
-                    "• Wait 30 seconds and upload again\n"
-                    "• Refresh the page (F5)\n"
-                    "• Use a smaller file (under 50MB)\n"
-                    "• Try Chrome or Firefox browser"
-                )
-            elif "BadZipFile" in error_msg or "zipfile" in error_msg.lower():
-                raise ValueError(
-                    "Invalid ZIP file. Please ensure you uploaded a valid "
-                    "Gmail Takeout ZIP file."
-                )
-            elif "mbox" in error_msg.lower():
-                raise ValueError(
-                    "No email data found. Please ensure you uploaded a "
-                    "Gmail Takeout file that contains emails."
-                )
-            else:
-                raise ValueError(f"Email parsing failed: {error_msg}")
-        finally:
-            # Cleanup temporary file
             try:
-                import os
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            except Exception:
-                pass  # Ignore cleanup errors
+                # Parse the mbox file with size and email limits
+                max_emails = filter_settings.get("max_emails_limit", 2000)
+                emails_df = parse_inbox_mbox(
+                    tmp_file.name, 
+                    max_bytes=200 * 1024 * 1024,  # 200MB limit
+                    max_emails=max_emails
+                )
+                
+                # Clean the email content
+                if not emails_df.empty:
+                    emails_df['content'] = emails_df['content'].apply(clean_email_body)
+                    
+                    # Convert dates to proper format
+                    emails_df['Date'] = pd.to_datetime(emails_df['Date'], errors='coerce')
+                    emails_df = emails_df.dropna(subset=['Date'])  # Remove invalid dates
+                    emails_df['Date'] = emails_df['Date'].dt.date
+                    
+                    # Apply filters
+                    emails_df = apply_email_filters(emails_df, filter_settings)
+                
+                return emails_df
+                
+            finally:
+                # Cleanup temp file
+                os.unlink(tmp_file.name)
                 
     except ValueError:
         # Re-raise ValueError as-is (these are user-friendly messages)
         raise
     except Exception as e:
-        # Catch any other unexpected errors
         error_msg = str(e)
-        if "403" in error_msg or "AxiosError" in error_msg:
-            raise ValueError(
-                "🚫 Hugging Face Spaces error (403). Please try:\n"
-                "• Refreshing the page and uploading again\n"
-                "• Using a smaller file (under 50MB)\n"
-                "• Trying a different browser"
-            )
-        else:
-            raise ValueError(f"Unexpected error: {error_msg}")
-
-def handle_hf_spaces_upload(uploaded_file):
-    """
-    Handle file uploads specifically for Hugging Face Spaces environment.
-    This function addresses common 403 errors and permission issues.
-    """
-    import time
-    import tempfile
-    
-    max_retries = 3
-    retry_delay = 1
-    
-    for attempt in range(max_retries):
-        try:
-            # Reset file pointer
-            uploaded_file.seek(0)
-            
-            # Read file content with error handling
-            try:
-                file_content = uploaded_file.getvalue()
-            except Exception as e:
-                if "403" in str(e) or "AxiosError" in str(e):
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
-                        continue
-                    else:
-                        raise ValueError(
-                            "🚫 Hugging Face Spaces upload error. Please:\n"
-                            "• Try a smaller file (under 50MB)\n"
-                            "• Refresh the page and try again\n"
-                            "• Use Chrome or Firefox browser"
-                        )
-                raise e
-            
-            # Validate file content
-            if len(file_content) == 0:
-                raise ValueError("Uploaded file is empty")
-            
-            file_size_mb = len(file_content) / (1024 * 1024)
-            if file_size_mb > 50:  # Conservative limit for HF Spaces
-                raise ValueError(
-                    f"File too large ({file_size_mb:.1f}MB). "
-                    f"Hugging Face Spaces works best with files under 50MB."
-                )
-            
-            # Create temporary file in a safer way for HF Spaces
-            try:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, 
-                    suffix='.zip',
-                    dir=tempfile.gettempdir()
-                ) as tmp_file:
-                    tmp_file.write(file_content)
-                    return tmp_file.name
-            except Exception as e:
-                raise ValueError(
-                    f"Cannot create temporary file in Hugging Face Spaces: {e}"
-                )
-                
-        except ValueError:
-            raise  # Re-raise user-friendly errors
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            else:
-                raise ValueError(
-                    f"Hugging Face Spaces file processing error: {e}"
-                )
-    
-    raise ValueError("Failed to process file after multiple attempts")
+        raise ValueError(f"Email parsing failed: {error_msg}")
