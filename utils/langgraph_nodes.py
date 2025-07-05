@@ -111,11 +111,6 @@ def validate_json_node(state):
         cleaned_json = auto_fix_json(cleaned_json)
         
         parsed = json.loads(cleaned_json)
-        
-        # Ensure email_index is correctly populated
-        email_index = state.get("email_index", "unknown")
-        parsed = ensure_email_index_populated(parsed, email_index)
-        
         print(f"✅ JSON extraction successful: {parsed}")
         return {
             "validated_json": parsed,
@@ -236,35 +231,3 @@ def answer_node(state):
     )
     response = get_llm().invoke(filled)
     return {"final_answer": response.content, **state}
-
-def ensure_email_index_populated(validated_json, email_index):
-    """
-    Ensure the email_index field is correctly populated in extracted JSON.
-    This fixes cases where GPT fails to extract or incorrectly extracts
-    the Message-ID.
-    """
-    if not isinstance(validated_json, dict):
-        return validated_json
-    
-    # If we have a Topic structure, update the tasks array
-    if "Topic" in validated_json and isinstance(validated_json["Topic"], dict):
-        topic = validated_json["Topic"]
-        if "tasks" in topic and isinstance(topic["tasks"], list):
-            for task_item in topic["tasks"]:
-                if isinstance(task_item, dict):
-                    # Update email_index if missing or placeholder
-                    current_index = task_item.get("email_index", "")
-                    if not current_index or current_index in [
-                        "<unknown>", "unknown", ""
-                    ]:
-                        task_item["email_index"] = email_index
-    
-    # If it's a flat structure, update directly
-    if "email_index" in validated_json:
-        current_index = validated_json.get("email_index", "")
-        if not current_index or current_index in [
-            "<unknown>", "unknown", ""
-        ]:
-            validated_json["email_index"] = email_index
-    
-    return validated_json
