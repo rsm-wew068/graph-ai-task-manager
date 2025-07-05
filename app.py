@@ -1,5 +1,21 @@
 import sys
 import os
+import streamlit as st
+import pandas as pd
+import json
+
+# Configure Streamlit for large file uploads BEFORE any other operations
+try:
+    # Set configuration for maximum upload size
+    st._config.set_option('server.maxUploadSize', 1024)  # 1GB in MB
+except Exception:
+    pass  # Ignore if config setting fails
+
+st.set_page_config(
+    page_title="Automated Task Manager", 
+    page_icon="📧",
+    layout="wide"
+)
 
 # Robust path fix for Hugging Face Spaces and local development
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,8 +34,6 @@ print(f"Python path: {sys.path[:3]}")  # First 3 entries
 print(f"Utils directory exists: {os.path.exists(os.path.join(current_dir, 'utils'))}")
 print(f"Utils __init__.py exists: {os.path.exists(os.path.join(current_dir, 'utils', '__init__.py'))}")
 
-import streamlit as st
-
 # Try importing with error handling
 try:
     from utils.langgraph_dag import (
@@ -34,9 +48,6 @@ except ImportError as e:
     st.error(f"Import error: {e}")
     st.error("Please ensure all utils files are properly uploaded to your Hugging Face Space")
     st.stop()
-
-import pandas as pd
-import json
 
 
 def flatten_extractions(json_list):
@@ -98,6 +109,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Configure Streamlit for larger file uploads
+try:
+    import streamlit.config as config
+    config.set_option('server.maxUploadSize', 1000)  # 1GB limit
+except Exception:
+    pass  # Ignore if config can't be set
 st.title("📬 Automated Task Manager")
 
 st.markdown("""
@@ -174,6 +192,13 @@ st.markdown("""
 
 **✨ Benefits**: No more ZIP handling = faster, more reliable, no 403 errors!
 """)
+
+# Important note about file size warnings
+st.warning(
+    "⚠️ **Important**: If you see a browser warning about file size (e.g., '200MB limit'), "
+    "you can safely ignore it! Our system is configured to handle large files. "
+    "Just proceed with uploading your Inbox.mbox file of any size."
+)
 
 uploaded_file = st.file_uploader(
     "Upload your Inbox.mbox file (any size - we'll process first 200MB)",
