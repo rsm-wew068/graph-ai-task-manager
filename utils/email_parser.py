@@ -249,6 +249,7 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
     """
     Parse uploaded Inbox.mbox file with comprehensive error handling.
     Now expects users to upload the Inbox.mbox file directly (no ZIP).
+    Automatically limits processing to first 200MB for any size file.
     """
     if filter_settings is None:
         filter_settings = {}
@@ -268,19 +269,32 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
                 "4. The file should be located in: Takeout/Mail/Inbox.mbox"
             )
         
-        # Save uploaded file temporarily
+        # Get file size info
+        uploaded_file.seek(0)
+        file_content = uploaded_file.getvalue()
+        file_size_mb = len(file_content) / (1024 * 1024)
+        
+        # Info message about file size handling
+        if file_size_mb > 200:
+            print(f"📂 File size: {file_size_mb:.1f}MB - processing first 200MB for performance")
+        else:
+            print(f"📂 File size: {file_size_mb:.1f}MB - processing entire file")
+        
+        # Save uploaded file temporarily, but only write first 200MB
         import tempfile
+        max_bytes_to_write = min(len(file_content), 200 * 1024 * 1024)  # 200MB limit
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mbox') as tmp_file:
-            uploaded_file.seek(0)
-            tmp_file.write(uploaded_file.getvalue())
+            # Write only the first 200MB of the file
+            tmp_file.write(file_content[:max_bytes_to_write])
             tmp_file.flush()
             
             try:
-                # Parse the mbox file with size and email limits
+                # Parse the limited mbox file
                 max_emails = filter_settings.get("max_emails_limit", 2000)
                 emails_df = parse_inbox_mbox(
                     tmp_file.name, 
-                    max_bytes=200 * 1024 * 1024,  # 200MB limit
+                    max_bytes=200 * 1024 * 1024,  # This will process the whole temp file now
                     max_emails=max_emails
                 )
                 
