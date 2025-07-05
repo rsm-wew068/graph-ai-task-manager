@@ -162,22 +162,33 @@ with col3:
 st.header("📂 Upload & Parse Emails")
 
 st.markdown("""
-### 🚀 Getting Started
-1. **Export your Gmail**: Go to [Google Takeout](https://takeout.google.com/), select Mail, and download as ZIP
-2. **Upload the ZIP file** below to start processing
-3. **Parse emails** to get a quick preview of your data
-4. **Run LLM processing** to extract structured tasks
-5. **Use the sidebar** to navigate to Calendar and Chatbot views
+### 🚀 Getting Started (New Simplified Process!)
+1. **Download your Gmail Takeout**: Go to [Google Takeout](https://takeout.google.com/)
+   - Select **Mail** → **Multiple formats** → Choose only **"Inbox"**
+   - Download as ZIP and **extract/unzip it on your computer**
+2. **Find the Inbox.mbox file**: Look for `Takeout/Mail/Inbox.mbox` in the extracted folder
+3. **Upload the Inbox.mbox file directly** (no ZIP needed!)
+4. **Parse emails** to get a preview (first 200MB processed)
+5. **Run LLM processing** to extract structured tasks
+6. **Use the sidebar** to navigate to Calendar and Chatbot views
+
+**✨ Benefits**: No more ZIP handling = faster, more reliable, no 403 errors!
 """)
 
 uploaded_file = st.file_uploader(
-    "Upload your Gmail Takeout ZIP file (containing .mbox)",
-    type=["zip"],
-    help="Export your Gmail data from Google Takeout and upload the ZIP file here."
+    "Upload your Inbox.mbox file (extracted from Gmail Takeout)",
+    type=["mbox"],
+    help="First extract your Gmail Takeout ZIP, then upload the Inbox.mbox file directly."
 )
 
 if uploaded_file is not None:
     st.session_state.uploaded_file_name = uploaded_file.name
+    
+    # Show helpful info about the new parsing approach
+    st.info(
+        "📋 **Simplified approach**: Upload your Inbox.mbox file directly! "
+        "We process the first 200MB for better performance and reliability."
+    )
     
     # Intelligent Email Filtering
     st.subheader("🔍 Smart Email Filtering")
@@ -226,8 +237,8 @@ if uploaded_file is not None:
         with col_adv1:
             max_emails_limit = st.number_input(
                 "Max emails (safety limit)",
-                min_value=10, max_value=10000, value=2000,
-                help="Maximum emails to parse (prevents overload)"
+                min_value=10, max_value=5000, value=2000,
+                help="Maximum emails to parse from Inbox.mbox (we process first 200MB)"
             )
         with col_adv2:
             exclude_types = st.multiselect(
@@ -585,8 +596,8 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
 st.markdown("---")
 st.markdown("""
 ### 📖 How to use:
-1. **Upload** your Gmail Takeout ZIP file
-2. **Parse** emails (quick preview)  
+1. **Upload** your Inbox.mbox file (extracted from Gmail Takeout)
+2. **Parse** emails (first 200MB processed for performance)  
 3. **Process** with LLM (slower, extracts tasks)
 4. **Validate** any flagged JSON manually
 5. **Navigate** to other pages to view results
@@ -594,8 +605,10 @@ st.markdown("""
 Data persists across page navigation! 🎉
 
 ### 🔧 Features:
+- **Direct .mbox Upload**: No ZIP handling, faster and more reliable
+- **Memory-Safe**: Processes first 200MB to avoid memory issues  
 - **Human-in-the-Loop Validation**: Review and correct extracted JSON
-- **Persistent State**: Data stays available across page navigation  
+- **Persistent State**: Data stays available across page navigation
 - **Graph Visualization**: See task relationships and dependencies
 - **Calendar View**: Time-based view of extracted tasks
 - **AI Chatbot**: Ask natural language questions about your tasks
