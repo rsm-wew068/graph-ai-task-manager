@@ -42,56 +42,33 @@ Final Answer (improved):
 # Prompt for RAG-based task extraction from email content
 example_json = '''{{
   "Topic": {{
-    "name": "Deal Blotter",
+    "name": "Interview Scheduling",
     "tasks": [
       {{
-        "email_index": "<26322156.1075841888052.JavaMail.evans@thyme>",
+        "email_index": "<message123@gmail.com>",
         "task": {{
-          "name": "Ensure off-peak deals are entered correctly in the deal blotter by checking settings and deal entry methods.",
-          "summary": "The email discusses issues with the default settings for traders' deal blotters and seeks a solution for correctly entering off-peak deals.",
-          "start_date": "2001-01-18",
-          "due_date": "2001-01-25",
+          "name": "Schedule interview with Rachel Wang",
+          "summary": "Interview scheduled for Thursday at 12:00 PM PT.",
+          "start_date": "2025-06-26",
+          "due_date": "2025-06-26",
           "owner": {{
-            "name": "Kate Symes",
-            "role": "Senior Power Trader",
-            "department": "Trading",
-            "organization": "Enron"
+            "name": "Shiqi Wang",
+            "role": "Hiring Manager",
+            "department": "Engineering",
+            "organization": "CCM Chase"
           }},
           "collaborators": [
             {{
-              "name": "Duong Luu",
-              "role": "Trader",
-              "department": "Southwest Desk",
-              "organization": "Enron"
+              "name": "Daniel Griffiths",
+              "role": "Team Lead",
+              "department": "Engineering",
+              "organization": "CCM Chase"
             }},
             {{
-              "name": "Will Smith",
-              "role": "Trader",
-              "department": "Southwest Desk",
-              "organization": "Enron"
-            }}
-          ]
-        }}
-      }},
-      {{
-        "email_index": "<4004888.1075841931363.JavaMail.evans@thyme>",
-        "task": {{
-          "name": "Ensure off-peak deals are entered correctly in the deal blotter by verifying settings and entries.",
-          "summary": "The email discusses issues with the default settings for the deal blotter, specifically concerning the entry of off-peak deals and the inclusion of Sundays and holidays.",
-          "start_date": "2001-01-18",
-          "due_date": "2001-02-01",
-          "owner": {{
-            "name": "Kate Symes",
-            "role": "Senior Power Trader",
-            "department": "Trading",
-            "organization": "Enron"
-          }},
-          "collaborators": [
-            {{
-              "name": "Unknown",
-              "role": "Unknown",
-              "department": "Unknown",
-              "organization": "Unknown"
+              "name": "Aishwarya Vyas", 
+              "role": "HR Coordinator",
+              "department": "Human Resources",
+              "organization": "CCM Chase"
             }}
           ]
         }}
@@ -101,14 +78,27 @@ example_json = '''{{
 }}'''
 
 rag_extraction_prompt = PromptTemplate.from_template(f"""
-You are reviewing a group of emails that belong to the same topic.
+You are analyzing emails to extract structured task information.
+Each email contains comprehensive metadata and content.
 
-Each email contains exactly one task.
+EMAIL FORMAT EXPLANATION:
+- Message-ID: Unique email identifier (use this as email_index)
+- Date: When the email was sent
+- From/To/Cc/Bcc: Participants with names and email addresses
+- Subject: Email subject line
+- Email Content: The actual message body
+
+ORGANIZATION EXTRACTION TIPS:
+- Check email domains (@company.com) to identify organizations
+- Look for company signatures, titles, and department mentions
+- Extract role information from email signatures or content
+- Use "Unknown" only when information is genuinely unavailable
 
 Your task is to:
 - Assign a specific topic name (1–3 words)
-- Extract topic metadata (start date, due date, description, owner(s), collaborators)
-- Extract one task from each email (email_index, name, summary)
+- Extract topic metadata (start date, due date, description, owners)
+- Extract one task from each email (use Message-ID as email_index)
+- Identify organizations from email domains and signatures
 - Return valid structured JSON like this:
 
 {example_json}
@@ -116,9 +106,11 @@ Your task is to:
 CRITICAL JSON FORMATTING RULES:
 - Use double quotes for all strings
 - Add commas after every property except the last one
-- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2" 
+- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2"
 - Do not include markdown, backticks, or comments
 - Ensure all braces and brackets are properly closed
+- For email_index: Use the exact Message-ID provided
+- For organizations: Extract from email domains (e.g., @google.com → "Google")
 
 Context:
 \"\"\"
