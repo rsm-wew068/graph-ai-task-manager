@@ -40,32 +40,40 @@ def build_faiss_index(chunks, batch_size=512, max_chunks=100000):
 
     return index, chunks
 
-def save_index(index, path="faiss_index.idx"):
-    faiss.write_index(index, path)
-
-def load_index(path="faiss_index.idx"):
-    return faiss.read_index(path)
 
 def embed_dataframe(df, content_col="content"):
+    """
+    Create embeddings for dataframe content without saving to disk.
+    Returns index and chunks for in-memory use only.
+    """
     # Create a copy to avoid SettingWithCopyWarning
     df_copy = df.copy()
     df_copy["chunks"] = df_copy[content_col].apply(lambda x: chunk_text(x))
     all_chunks = df_copy["chunks"].explode().dropna().tolist()
+    
+    # Build index but don't save to disk
     index, chunks = build_faiss_index(all_chunks)
-    save_index(index)
+    
     return index, chunks
 
 
-def retrieve_similar_chunks(query, index=None, chunks=None, k=3):
-    if index is None:
-        index = load_index()
-    if chunks is None:
-        raise ValueError("Must provide chunks list for index reference.")
+def retrieve_similar_chunks(query, index, chunks, k=3):
+    """
+    Retrieve similar chunks using provided index and chunks.
+    No file loading required - works with in-memory objects.
+    """
+    if index is None or chunks is None:
+        raise ValueError(
+            "Must provide both index and chunks for similarity search."
+        )
 
     model = get_model()
     if model is None:
         raise RuntimeError("Failed to load sentence transformer model")
         
     vector = model.encode([query])
-    D, I = index.search(np.array(vector, dtype=np.float32), k)
-    return [chunks[i] for i in I[0]]
+    distances, indices = index.search(np.array(vector, dtype=np.float32), k)
+    
+    # Handle case where index might be smaller than k
+    valid_indices = [i for i in indices[0] if i < len(chunks)]
+    return [chunks[i] for i in valid_indices]
