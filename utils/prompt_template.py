@@ -42,33 +42,56 @@ Final Answer (improved):
 # Prompt for RAG-based task extraction from email content
 example_json = '''{{
   "Topic": {{
-    "name": "Interview Scheduling",
+    "name": "Deal Blotter",
     "tasks": [
       {{
-        "email_index": "<message123@gmail.com>",
+        "email_index": "<26322156.1075841888052.JavaMail.evans@thyme>",
         "task": {{
-          "name": "Schedule interview with Rachel Wang",
-          "summary": "Interview scheduled for Thursday at 12:00 PM PT.",
-          "start_date": "2025-06-26",
-          "due_date": "2025-06-26",
+          "name": "Ensure off-peak deals are entered correctly in the deal blotter by checking settings and deal entry methods.",
+          "summary": "The email discusses issues with the default settings for traders' deal blotters and seeks a solution for correctly entering off-peak deals.",
+          "start_date": "2001-01-18",
+          "due_date": "2001-01-25",
           "owner": {{
-            "name": "Shiqi Wang",
-            "role": "Hiring Manager",
-            "department": "Engineering",
-            "organization": "CCM Chase"
+            "name": "Kate Symes",
+            "role": "Senior Power Trader",
+            "department": "Trading",
+            "organization": "Enron"
           }},
           "collaborators": [
             {{
-              "name": "Daniel Griffiths",
-              "role": "Team Lead",
-              "department": "Engineering",
-              "organization": "CCM Chase"
+              "name": "Duong Luu",
+              "role": "Trader",
+              "department": "Southwest Desk",
+              "organization": "Enron"
             }},
             {{
-              "name": "Aishwarya Vyas", 
-              "role": "HR Coordinator",
-              "department": "Human Resources",
-              "organization": "CCM Chase"
+              "name": "Will Smith",
+              "role": "Trader",
+              "department": "Southwest Desk",
+              "organization": "Enron"
+            }}
+          ]
+        }}
+      }},
+      {{
+        "email_index": "<4004888.1075841931363.JavaMail.evans@thyme>",
+        "task": {{
+          "name": "Ensure off-peak deals are entered correctly in the deal blotter by verifying settings and entries.",
+          "summary": "The email discusses issues with the default settings for the deal blotter, specifically concerning the entry of off-peak deals and the inclusion of Sundays and holidays.",
+          "start_date": "2001-01-18",
+          "due_date": "2001-02-01",
+          "owner": {{
+            "name": "Kate Symes",
+            "role": "Senior Power Trader",
+            "department": "Trading",
+            "organization": "Enron"
+          }},
+          "collaborators": [
+            {{
+              "name": "Unknown",
+              "role": "Unknown",
+              "department": "Unknown",
+              "organization": "Unknown"
             }}
           ]
         }}
@@ -78,42 +101,78 @@ example_json = '''{{
 }}'''
 
 rag_extraction_prompt = PromptTemplate.from_template(f"""
-You are analyzing emails to extract structured task information.
-Each email contains comprehensive metadata and content.
+You are an expert email task extraction assistant. Your job is to analyze
+email metadata and content to extract structured task information.
 
-EMAIL FORMAT EXPLANATION:
-- Message-ID: Unique email identifier (use this as email_index)
-- Date: When the email was sent
-- From/To/Cc/Bcc: Participants with names and email addresses
-- Subject: Email subject line
-- Email Content: The actual message body
+INSTRUCTIONS:
+1. Read the email metadata (Message-ID, From, To, etc.) and content carefully
+2. Extract exactly ONE task from the email (if any exists)
+3. Use the Message-ID as the email_index (critical for data integrity)
+4. Infer organizations from email domains (e.g., @company.com → "Company")
+5. Extract people information from email headers (From, To, Cc, Bcc)
+6. Assign a topic name (1-3 words) that groups related tasks
+7. Return valid JSON following the exact structure shown below
 
-ORGANIZATION EXTRACTION TIPS:
-- Check email domains (@company.com) to identify organizations
-- Look for company signatures, titles, and department mentions
-- Extract role information from email signatures or content
-- Use "Unknown" only when information is genuinely unavailable
+EMAIL DATA TO ANALYZE:
+\"\"\"
+{{main_email}}
+\"\"\"
 
-Your task is to:
-- Assign a specific topic name (1–3 words)
-- Extract topic metadata (start date, due date, description, owners)
-- Extract one task from each email (use Message-ID as email_index)
-- Identify organizations from email domains and signatures
-- Return valid structured JSON like this:
+EXTRACTION RULES:
+- email_index: Use the exact Message-ID from email metadata
+- Organizations: Extract from email domains (@company.com → "Company")
+- People names: Use Name-From, Name-To fields when available, otherwise
+  parse from email addresses
+- Dates: Infer from email content or use email Date if no specific dates
+  mentioned
+- If no clear task exists, create a minimal task for the email's main purpose
 
+REQUIRED JSON FORMAT:
 {example_json}
 
 CRITICAL JSON FORMATTING RULES:
+- Use the exact Message-ID for email_index (found in EMAIL METADATA section)
 - Use double quotes for all strings
 - Add commas after every property except the last one
 - Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2"
 - Do not include markdown, backticks, or comments
 - Ensure all braces and brackets are properly closed
-- For email_index: Use the exact Message-ID provided
-- For organizations: Extract from email domains (e.g., @google.com → "Google")
+- Extract organizations from email domains in From/To/Cc/Bcc fields
 
-Context:
-\"\"\"
-{{main_email}}
-\"\"\"
+RESPOND WITH ONLY THE JSON - NO OTHER TEXT.
 """)
+
+# Update the example to show how to use Message-ID
+example_json = '''{{
+  "Topic": {{
+    "name": "Deal Blotter Management",
+    "tasks": [
+      {{
+        "email_index": "<26322156.1075841888052.JavaMail.evans@thyme>",
+        "task": {{
+          "name": "Configure off-peak deal entry settings in deal blotter",
+          "summary": "Email discusses issues with default settings for " +
+                     "traders' deal blotters and seeks solution for " +
+                     "correctly entering off-peak deals including " +
+                     "Sundays and holidays.",
+          "start_date": "2001-01-18",
+          "due_date": "2001-01-25",
+          "owner": {{
+            "name": "Kate Symes",
+            "role": "Senior Power Trader",
+            "department": "Trading",
+            "organization": "Enron"
+          }},
+          "collaborators": [
+            {{
+              "name": "Duong Luu",
+              "role": "Trader",
+              "department": "Southwest Desk",
+              "organization": "Enron"
+            }}
+          ]
+        }}
+      }}
+    ]
+  }}
+}}'''
