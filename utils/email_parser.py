@@ -177,17 +177,29 @@ def apply_email_filters(df, filter_settings):
         start_date = pd.to_datetime(filter_settings["start_date"])
         end_date = pd.to_datetime(filter_settings["end_date"])
         
-        # Convert email dates to datetime
-        df['Date_parsed'] = pd.to_datetime(df['Date'], errors='coerce')
+        # Ensure Date column is datetime (should already be converted)
+        if not pd.api.types.is_datetime64_any_dtype(df['Date']):
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         
-        # Apply date filter
-        date_mask = (df['Date_parsed'] >= start_date) & (df['Date_parsed'] <= end_date)
+        # Handle timezone awareness - convert both to same timezone or remove timezone
+        if df['Date'].dt.tz is not None:
+            # If dates are timezone-aware, convert filter dates to UTC
+            start_date = start_date.tz_localize('UTC') if start_date.tz is None else start_date
+            end_date = end_date.tz_localize('UTC') if end_date.tz is None else end_date
+        else:
+            # If dates are timezone-naive, remove timezone from filter dates if present
+            start_date = start_date.tz_localize(None) if start_date.tz is not None else start_date
+            end_date = end_date.tz_localize(None) if end_date.tz is not None else end_date
+        
+        # Apply date filter directly on Date column
+        date_mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
         df = df[date_mask]
         print(f"📅 Date filter: {len(df)}/{original_count} emails")
     
     # Filter 2: Content length
     min_length = filter_settings.get("min_content_length", 50)
     if min_length > 0:
+        df = df.copy()  # Ensure we're working on a copy to avoid warnings
         df['content_length'] = df['content'].fillna('').str.len()
         df = df[df['content_length'] >= min_length]
         print(f"📝 Content filter: {len(df)} emails with >{min_length} chars")
@@ -337,13 +349,17 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
                 if not emails_df.empty:
                     emails_df['content'] = emails_df['content'].apply(clean_email_body)
                     
-                    # Convert dates to proper format
+                    # Convert dates to proper datetime format first
                     emails_df['Date'] = pd.to_datetime(emails_df['Date'], errors='coerce')
-                    emails_df = emails_df.dropna(subset=['Date'])  # Remove invalid dates
-                    emails_df['Date'] = emails_df['Date'].dt.date
                     
-                    # Apply filters
+                    # Apply filters (which need datetime objects)
                     emails_df = apply_email_filters(emails_df, filter_settings)
+                    
+                    # Only after filtering, convert to date objects for display
+                    # Remove rows with invalid dates first
+                    emails_df = emails_df.dropna(subset=['Date'])
+                    if not emails_df.empty:
+                        emails_df['Date'] = emails_df['Date'].dt.date
                 
                 return emails_df
                 
