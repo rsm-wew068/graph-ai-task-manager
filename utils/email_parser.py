@@ -269,10 +269,45 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
                 "4. The file should be located in: Takeout/Mail/Inbox.mbox"
             )
         
-        # Get file size info
-        uploaded_file.seek(0)
-        file_content = uploaded_file.getvalue()
+        # Enhanced file access with better error messages
+        try:
+            uploaded_file.seek(0)
+            file_content = uploaded_file.getvalue()
+        except Exception as e:
+            if "403" in str(e) or "Forbidden" in str(e):
+                raise ValueError(
+                    "❌ Upload blocked by server (403 error).\n\n"
+                    "Solutions to try:\n"
+                    "1. Try a smaller .mbox file (< 500MB)\n"
+                    "2. Use a different browser (Chrome/Firefox)\n"
+                    "3. Check your internet connection\n"
+                    "4. Try uploading from a different network\n"
+                    "5. Consider running the app locally for large files"
+                )
+            elif "timeout" in str(e).lower():
+                raise ValueError(
+                    "❌ Upload timed out.\n\n"
+                    "Solutions:\n"
+                    "1. Try a smaller file or stable internet connection\n"
+                    "2. Split your .mbox file into smaller chunks\n"
+                    "3. Use a wired connection instead of WiFi"
+                )
+            else:
+                raise ValueError(f"❌ File upload failed: {str(e)}")
+        
         file_size_mb = len(file_content) / (1024 * 1024)
+        
+        # Validate file content
+        if len(file_content) == 0:
+            raise ValueError("❌ Uploaded file is empty. Please check your .mbox file.")
+        
+        # Check if file looks like valid mbox format
+        file_start = file_content[:1000].decode('utf-8', errors='ignore')
+        if not file_start.startswith('From '):
+            raise ValueError(
+                "❌ File doesn't appear to be a valid .mbox format.\n\n"
+                "Make sure you uploaded the Inbox.mbox file (not a ZIP or other format)."
+            )
         
         # Info message about file size handling
         if file_size_mb > 200:
@@ -321,4 +356,43 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
         raise
     except Exception as e:
         error_msg = str(e)
-        raise ValueError(f"Email parsing failed: {error_msg}")
+        if "403" in error_msg or "Forbidden" in error_msg:
+            raise ValueError(
+                "❌ Server rejected the upload (403 Forbidden).\n\n"
+                "This usually means:\n"
+                "1. File is too large for the server configuration\n"
+                "2. Server security settings are blocking the upload\n"
+                "3. Network/proxy restrictions\n\n"
+                "Try: smaller file, different browser, or local installation"
+            )
+        else:
+            raise ValueError(f"Email parsing failed: {error_msg}")
+
+
+def validate_mbox_file_format(file_path):
+    """
+    Validate that a file is in proper mbox format.
+    
+    Args:
+        file_path: Path to the file to validate
+        
+    Returns:
+        bool: True if valid mbox format, False otherwise
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            # Read first few bytes to check format
+            header = f.read(1000).decode('utf-8', errors='ignore')
+            
+            # mbox files should start with "From "
+            if not header.startswith('From '):
+                return False
+                
+            # Check for typical email headers
+            common_headers = ['Date:', 'From:', 'To:', 'Subject:']
+            found_headers = sum(1 for h in common_headers if h in header)
+            
+            return found_headers >= 2  # At least 2 common headers should be present
+            
+    except Exception:
+        return False
