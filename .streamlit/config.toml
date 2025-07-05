@@ -7,6 +7,7 @@ textColor = "#262730"
 [server]
 headless = true
 port = 7860
+maxUploadSize = 1000
 
 [browser]
 gatherUsageStats = false
