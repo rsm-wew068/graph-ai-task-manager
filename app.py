@@ -42,6 +42,12 @@ try:
     )
     from utils.email_parser import parse_uploaded_file_with_filters_safe
     from utils.embedding import embed_dataframe
+    from utils.upload_helpers import (
+        create_chunked_upload_interface,
+        create_local_file_instructions, 
+        create_mbox_splitting_guide,
+        validate_upload_environment
+    )
     print("✅ Successfully imported utils modules")
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -206,8 +212,56 @@ uploaded_file = st.file_uploader(
     help="Extract Gmail Takeout ZIP, then upload Inbox.mbox (any size file accepted)."
 )
 
+# Add troubleshooting section for upload errors
+with st.expander("🚨 Upload Issues? Click here for solutions"):
+    st.markdown("""
+    **If you're getting upload errors (403, timeout, etc.):**
+    
+    1. **File Size**: Try a smaller portion of your .mbox file first
+    2. **Browser**: Switch to Chrome or Firefox (better upload handling)
+    3. **Connection**: Ensure stable internet during upload
+    4. **File Format**: Verify the file ends with `.mbox` (not `.zip`)
+    5. **Antivirus**: Temporarily disable antivirus scanning during upload
+    
+    **Alternative Solutions:**
+    - **Split your mbox**: Use a date range export from Gmail (e.g., last 6 months)
+    - **Local processing**: Download and run this app locally if upload keeps failing
+    - **File validation**: Open your .mbox file in a text editor to ensure it's not corrupted
+    
+    📖 **[View detailed troubleshooting guide](./TROUBLESHOOTING.md)**
+    """)
+
+# Add alternative upload methods for 403 errors
+if st.checkbox("🔄 Alternative Upload Methods (for 403 errors)"):
+    st.markdown("---")
+    
+    # Show environment check
+    validate_upload_environment()
+    
+    # Chunked upload option
+    create_chunked_upload_interface()
+    
+    # File splitting guide
+    create_mbox_splitting_guide()
+    
+    # Local installation guide
+    create_local_file_instructions()
+
+# Add link to troubleshooting guide
+st.sidebar.markdown("---")
+st.sidebar.markdown("🆘 **Having upload issues?**")
+st.sidebar.markdown("📖 [Troubleshooting Guide](./TROUBLESHOOTING.md)")
+st.sidebar.markdown("💡 [Report Issues](https://github.com/your-repo/issues)")
+
 if uploaded_file is not None:
     st.session_state.uploaded_file_name = uploaded_file.name
+    
+    # Show file upload success and details
+    try:
+        file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+        st.success(f"✅ File uploaded successfully: {uploaded_file.name} ({file_size:.1f} MB)")
+    except Exception as e:
+        st.warning(f"⚠️ File uploaded but size check failed: {str(e)}")
     
     # Show helpful info about the new parsing approach
     st.info(
