@@ -8,6 +8,11 @@ textColor = "#262730"
 headless = true
 port = 7860
 maxUploadSize = 1000
+maxMessageSize = 1000
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = false
+allowRunOnSave = true
 
 [browser]
 gatherUsageStats = false
