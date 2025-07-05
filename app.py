@@ -422,49 +422,18 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
                             f"{email_row.get('Subject', 'No Subject')[:50]}..."
                         )
                         
-                        # Create comprehensive email data with all metadata
-                        email_data = {
-                            "Message-ID": email_row.get('Message-ID', ''),
-                            "Date": str(email_row.get('Date', '')),
-                            "From": email_row.get('From', ''),
-                            "To": email_row.get('To', ''),
-                            "Cc": email_row.get('Cc', ''),
-                            "Bcc": email_row.get('Bcc', ''),
-                            "Name-From": email_row.get('Name-From', ''),
-                            "Name-To": email_row.get('Name-To', ''),
-                            "Name-Cc": email_row.get('Name-Cc', ''),
-                            "Name-Bcc": email_row.get('Name-Bcc', ''),
-                            "Subject": email_row.get('Subject', ''),
-                            "Content": email_row.get(
-                                'content',
-                                email_row.get(
-                                    'Body', email_row.get('Text', '')
-                                )
-                            )
-                        }
-                        
-                        # Format structured email for GPT processing
-                        email_text = f"""EMAIL METADATA:
-Message-ID: {email_data['Message-ID']}
-Date: {email_data['Date']}
-From: {email_data['From']} ({email_data['Name-From']})
-To: {email_data['To']} ({email_data['Name-To']})
-Cc: {email_data['Cc']} ({email_data['Name-Cc']})
-Bcc: {email_data['Bcc']} ({email_data['Name-Bcc']})
-Subject: {email_data['Subject']}
-
-EMAIL CONTENT:
-{email_data['Content']}"""
+                        # Extract email text (combine subject and body)
+                        email_text = f"Subject: {email_row.get('Subject', '')}\n\n"
+                        email_text += email_row.get('content', email_row.get('Body', email_row.get('Text', '')))
                         
                         # Get proper email identifier (Message-ID or fallback)
-                        message_id = email_data['Message-ID']
+                        message_id = email_row.get('Message-ID')
                         if not message_id:
-                            # Fallback to unique identifier if missing
-                            from_addr = email_data['From']
-                            subject = email_data['Subject']
-                            date = email_data['Date']
-                            msg_id = f"{from_addr}_{subject}_{date}"
-                            message_id = msg_id.replace(' ', '_')[:100]
+                            # Fallback to unique identifier if Message-ID missing
+                            from_addr = email_row.get('From', 'unknown')
+                            subject = email_row.get('Subject', 'no-subject')
+                            date = email_row.get('Date', '1970-01-01')
+                            message_id = f"{from_addr}_{subject}_{date}".replace(' ', '_')[:100]
                         
                         # Run extraction for this email
                         try:
@@ -476,7 +445,7 @@ EMAIL CONTENT:
                             # Handle individual email errors
                             outputs.append({
                                 "email_index": message_id,
-                                "status": "error",
+                                "status": "error", 
                                 "error": str(e),
                                 "extracted_json": {},
                                 "valid": False
