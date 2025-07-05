@@ -422,18 +422,33 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
                             f"{email_row.get('Subject', 'No Subject')[:50]}..."
                         )
                         
-                        # Extract email text (combine subject and body)
-                        email_text = f"Subject: {email_row.get('Subject', '')}\n\n"
-                        email_text += email_row.get('content', email_row.get('Body', email_row.get('Text', '')))
-                        
                         # Get proper email identifier (Message-ID or fallback)
                         message_id = email_row.get('Message-ID')
                         if not message_id:
-                            # Fallback to unique identifier if Message-ID missing
+                            # Fallback to unique identifier if missing
                             from_addr = email_row.get('From', 'unknown')
                             subject = email_row.get('Subject', 'no-subject')
                             date = email_row.get('Date', '1970-01-01')
-                            message_id = f"{from_addr}_{subject}_{date}".replace(' ', '_')[:100]
+                            message_id = f"{from_addr}_{subject}_{date}".replace(
+                                ' ', '_'
+                            )[:100]
+                        
+                        # Extract comprehensive email data for GPT processing
+                        content = email_row.get(
+                            'content', 
+                            email_row.get('Body', email_row.get('Text', 'No content'))
+                        )
+                        email_text = f"""Email Metadata:
+Message-ID: {message_id}
+Date: {email_row.get('Date', 'Unknown')}
+From: {email_row.get('Name-From', 'Unknown')} <{email_row.get('From', '')}>
+To: {email_row.get('Name-To', 'Unknown')} <{email_row.get('To', '')}>
+Cc: {email_row.get('Name-Cc', 'Unknown')} <{email_row.get('Cc', '')}>
+Bcc: {email_row.get('Name-Bcc', 'Unknown')} <{email_row.get('Bcc', '')}>
+Subject: {email_row.get('Subject', 'No Subject')}
+
+Email Content:
+{content}"""
                         
                         # Run extraction for this email
                         try:
