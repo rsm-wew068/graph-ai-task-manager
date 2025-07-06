@@ -2,14 +2,43 @@ from langgraph.graph import StateGraph
 from typing import TypedDict
 from datetime import datetime
 from utils.langgraph_nodes import (
-    topic_inference_node,
     query_graph_node,
     answer_node,
     rag_prompt_node,
     extract_json_node,
-    validate_json_node,
     write_graph_node,
 )
+
+
+def is_meaningful_task(task_name: str, task_obj: dict) -> bool:
+    """
+    Simplified validation - only reject truly empty or generic fallback tasks.
+    
+    Args:
+        task_name: The name/title of the task
+        task_obj: The full task object with additional context
+        
+    Returns:
+        True if task seems meaningful, False if it should trigger HITL
+    """
+    if not task_name or len(task_name.strip()) <= 3:
+        return False
+    
+    # Only reject obvious fallback/error cases
+    fallback_names = [
+        "unnamed task", "extracted task", "manual review required",
+        "email review", "no content", "unknown task"
+    ]
+    
+    name_lower = task_name.lower().strip()
+    
+    # Only reject exact matches to fallback names
+    if name_lower in fallback_names:
+        return False
+    
+    # Accept everything else - let humans decide during HITL if needed
+    return True
+
 
 # Define pipeline state schema
 class AppState(TypedDict, total=False):
@@ -21,14 +50,12 @@ class AppState(TypedDict, total=False):
     final_answer: str
 
 
-# Build the workflow
+# Build the simplified workflow using GraphRAG
 workflow = StateGraph(state_schema=AppState)
-workflow.add_node("topic_inference", topic_inference_node)
 workflow.add_node("query_graph", query_graph_node)
 workflow.add_node("answer", answer_node)
 
-workflow.set_entry_point("topic_inference")
-workflow.add_edge("topic_inference", "query_graph")
+workflow.set_entry_point("query_graph")
 workflow.add_edge("query_graph", "answer")
 workflow.set_finish_point("answer")
 
@@ -42,9 +69,11 @@ def run_agent_chat_round(user_query: str) -> dict:
     }
     return graph_app.invoke(initial_state)
 
+
 # Extraction pipeline schema
 class ExtractionState(TypedDict, total=False):
-    email_text: str
+    current_email_row: dict  # Full email row with all metadata
+    email_text: str  # Backward compatibility - content only
     faiss_index: object
     all_chunks: list
     rag_prompt: str
@@ -56,14 +85,20 @@ class ExtractionState(TypedDict, total=False):
     needs_user_review: bool
     user_corrected_json: str
     status: str
+    email_index: str  # Message-ID for tracking
+
 
 extraction_workflow = StateGraph(state_schema=ExtractionState)
 extraction_workflow.add_node("build_prompt", rag_prompt_node)
 extraction_workflow.add_node("extract_json", extract_json_node)
 
 # Split validation into attempt and pause
+
+
 def attempt_json_parse_node(state):
-    """Attempt to parse JSON but don't retry - just mark for review if invalid."""
+    """
+    Attempt to parse JSON but don't retry - just mark for review if invalid.
+    """
     try:
         extracted = state.get("extracted_json", "")
         if not extracted:
@@ -78,32 +113,102 @@ def attempt_json_parse_node(state):
         import json
         parsed = json.loads(extracted)
         
-        # Basic validation - check if it has expected structure
-        if isinstance(parsed, dict) and (
-            "name" in parsed or "deliverable" in parsed or "task" in parsed
-        ):
-            return {
-                "validated_json": parsed,
-                "valid": True,
-                "needs_user_review": False,
-                "status": "valid_json",
-                **state
-            }
-        else:
-            return {
-                "valid": False,
-                "needs_user_review": True,
-                "status": "invalid_structure",
-                **state
-            }
+        # Enhanced validation for meaningful task content
+        if isinstance(parsed, dict):
+            # Check for nested structure (preferred)
+            if "Topic" in parsed and "tasks" in parsed.get("Topic", {}):
+                tasks = parsed["Topic"]["tasks"]
+                if tasks and isinstance(tasks, list) and len(tasks) > 0:
+                    # Check if first task has meaningful content
+                    first_task = tasks[0]
+                    if isinstance(first_task, dict) and "task" in first_task:
+                        task_obj = first_task["task"]
+                        task_name = task_obj.get("name", "")
+                        
+                        # Enhanced validation criteria
+                        if not is_meaningful_task(task_name, task_obj):
+                            # Don't trigger HITL for unmeaningful tasks, just auto-fix
+                            task_obj["name"] = f"Email Task: {task_obj.get('summary', 'Extracted from email')[:50]}"
+                        
+                        return {
+                            "validated_json": parsed,
+                            "valid": True,
+                            "needs_user_review": False,
+                            "status": "valid_json",
+                            **state
+                        }
+            
+            # Check for flat structure with meaningful content
+            elif ("deliverable" in parsed or "name" in parsed):
+                task_name = parsed.get("deliverable") or parsed.get("name", "")
+                
+                # Enhanced validation for flat structure
+                if not is_meaningful_task(task_name, parsed):
+                    # Auto-fix instead of triggering HITL
+                    parsed["deliverable"] = f"Email Task: {parsed.get('summary', 'Extracted from email')[:50]}"
+                
+                return {
+                    "validated_json": parsed,
+                    "valid": True,
+                    "needs_user_review": False,
+                    "status": "valid_json",
+                    **state
+                }
+        
+        # If we get here, JSON structure is unusual but parseable
+        # Create a basic fallback instead of triggering HITL
+        fallback_json = {
+            "name": "Email Review Task",
+            "deliverable": "Review and process email content",
+            "summary": str(parsed)[:100] + "..." if len(str(parsed)) > 100 else str(parsed),
+            "owner": "Unknown",
+            "role": "Unknown", 
+            "department": "Unknown",
+            "organization": "Unknown",
+            "start_date": "Unknown",
+            "due_date": "Unknown"
+        }
+        
+        return {
+            "validated_json": fallback_json,
+            "valid": True,
+            "needs_user_review": False,
+            "status": "auto_fallback_created",
+            **state
+        }
             
     except json.JSONDecodeError:
+        # JSON parsing failed - create an editable template from the original extraction
+        raw_json = state.get("extracted_json", "")
+        
+        # Try to auto-fix common issues for user editing
+        if raw_json:
+            try:
+                # Replace null values with "Unknown" to make it parseable for editing
+                fixed_json = raw_json.replace('null', '"Unknown"').replace('NULL', '"Unknown"')
+                # Try to parse the fixed version
+                import json
+                test_parse = json.loads(fixed_json)
+                # If successful, provide this as the correctable template
+                return {
+                    "valid": False,
+                    "needs_user_review": True,
+                    "status": "json_parse_error",
+                    "correctable_json": fixed_json,  # Provide correctable version
+                    **state
+                }
+            except:
+                pass
+        
+        # If auto-fix failed, still provide the original for manual editing
         return {
             "valid": False,
             "needs_user_review": True,
             "status": "json_parse_error",
+            "correctable_json": raw_json,  # At least show the original
             **state
         }
+
 
 def pause_for_user_review_node(state):
     """This node represents a pause - returns state for UI handling."""
@@ -195,17 +300,27 @@ extraction_workflow.add_conditional_edges("attempt_parse", router, {
     "fail": "fail"
 })
 
-# The pause_for_review node will finish the pipeline and return control to UI
-extraction_workflow.set_finish_point([
-    "write_graph", "fail", "pause_for_review"
-])
+# Set finish points - different nodes can end the workflow
+for endpoint in ["write_graph", "fail", "pause_for_review"]:
+    extraction_workflow.set_finish_point(endpoint)
 
 extraction_app = extraction_workflow.compile()
 
 
-def run_extraction_pipeline(email_text, faiss_index, all_chunks, email_index):
+def run_extraction_pipeline(email_row, faiss_index, all_chunks, email_index):
+    """
+    Run extraction pipeline with full email row metadata.
+    
+    Args:
+        email_row: Dictionary containing all email fields (Message-ID, From,
+                  To, Subject, content, etc.)
+        faiss_index: FAISS index for similarity search
+        all_chunks: List of text chunks for RAG
+        email_index: Message-ID or unique identifier for this email
+    """
     state = {
-        "email_text": email_text,
+        "current_email_row": email_row,
+        "email_text": email_row.get("content", ""),  # Backward compatibility
         "faiss_index": faiss_index,
         "all_chunks": all_chunks,
         "email_index": email_index,
