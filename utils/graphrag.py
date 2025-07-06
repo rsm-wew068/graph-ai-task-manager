@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Simplified GraphRAG - focused on what actually matters.
-~200 lines instead of 800.
+SIMPLE GraphRAG - No more complexity hell!
+Just semantic search + graph expansion. That's it.
 """
 from sentence_transformers import SentenceTransformer
 import networkx as nx
@@ -13,7 +13,7 @@ import numpy as np
 
 
 class GraphRAG:
-    """Simplified GraphRAG - AI-powered graph querying without unnecessary complexity."""
+    """Dead simple GraphRAG - find stuff, expand from there."""
     
     def __init__(self, graph_path: str = "topic_graph.gpickle"):
         self.graph_path = graph_path
@@ -39,167 +39,83 @@ class GraphRAG:
         for node, attrs in self.graph.nodes(data=True):
             label = attrs.get("label", "")
             name = attrs.get("name", str(node))
-            text = f"{label}: {name}"  # Simple: "Person: Rachel Martinez"
+            text = f"{label}: {name}"
             
             embedding = self.embedder.encode(text)
             self.node_embeddings[node] = embedding
-    
-    def semantic_search(self, query: str, top_k: int = 5) -> List[Tuple[str, float]]:
-        """Find nodes most similar to the query with improved keyword extraction."""
+    def semantic_search(self, query: str,
+                        top_k: int = 10) -> List[Tuple[str, float]]:
+        """Find nodes most similar to query."""
         if not self.node_embeddings:
             return []
             
-        # Extract key terms from query, ignoring common question words
-        stop_words = {'what', 'who', 'when', 'where', 'why', 'how', 'is', 'are', 'was', 'were', 
-                     'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
-                     'of', 'with', 'by', 'from', 'about', 'into', 'through', 'during', 
-                     'before', 'after', 'above', 'below', 'between', 'among', 'task', 
-                     'tasks', 'related', 'find', 'show', 'get', 'tell', 'me'}
-        
-        query_words = [word.strip().lower() for word in query.split() 
-                      if word.strip().lower() not in stop_words and len(word.strip()) > 2]
-        key_terms = ' '.join(query_words)
-        
         query_embedding = self.embedder.encode(query)
-        
         similarities = []
-        exact_matches = []
         
         for node, embedding in self.node_embeddings.items():
-            # Get node text
-            attrs = self.graph.nodes.get(node, {})
-            label = attrs.get("label", "")
-            name = attrs.get("name", str(node))
-            text = f"{label}: {name}".lower()
-            
-            # Check for exact keyword matches with key terms
-            if key_terms and (key_terms in text or 
-                             any(term in text for term in query_words if len(term) > 3)):
-                exact_matches.append((node, 1.0))  # Perfect match
-                
-            # Also compute semantic similarity
             sim = cosine_similarity([query_embedding], [embedding])[0][0]
-            if sim >= 0.15:  # Lower threshold for more matches
+            if sim >= 0.2:  # Reasonable threshold
                 similarities.append((node, sim))
         
-        # Prioritize exact matches, then semantic matches
-        all_matches = exact_matches + similarities
-        
-        # Remove duplicates and sort by score
-        seen = set()
-        unique_matches = []
-        for node, score in all_matches:
-            if node not in seen:
-                seen.add(node)
-                unique_matches.append((node, score))
-        
-        return sorted(unique_matches, key=lambda x: x[1], reverse=True)[:top_k]
+        return sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]
     
-    def find_connected_nodes(self, start_nodes: List[str], max_nodes: int = 10) -> set:
-        """Find nodes connected to start nodes following the schema paths SELECTIVELY."""
+    def expand_from_nodes(self, start_nodes: List[str], max_nodes: int = 10, direct_only: bool = False) -> set:
+        """Expand from starting nodes following all connections."""
         connected = set(start_nodes)
         
-        # Follow schema relationships selectively - check both incoming and outgoing edges
-        for node in start_nodes:
-            if node not in self.graph:
+        if direct_only:
+            # Only add direct neighbors - no expansion of expansions
+            for node in start_nodes:
+                if node not in self.graph:
+                    continue
+                    
+                # Add direct neighbors (outgoing)
+                for neighbor in self.graph.neighbors(node):
+                    connected.add(neighbor)
+                    
+                # Add direct predecessors (incoming)
+                for predecessor in self.graph.predecessors(node):
+                    connected.add(predecessor)
+            
+            return connected
+        
+        # Topic-centered expansion: expand systematically through the hierarchy
+        to_expand = list(start_nodes)
+        
+        while to_expand and len(connected) < max_nodes:
+            current_node = to_expand.pop(0)
+            if current_node not in self.graph:
                 continue
                 
-            # Check OUTGOING edges (node -> neighbor)
-            for neighbor in self.graph.neighbors(node):
+            # Add all direct neighbors
+            for neighbor in self.graph.neighbors(current_node):
                 if len(connected) >= max_nodes:
                     break
-                    
-                edge_data = self.graph.get_edge_data(node, neighbor, {})
-                edge_label = edge_data.get('label', '')
-                neighbor_attrs = self.graph.nodes.get(neighbor, {})
-                neighbor_label = neighbor_attrs.get('label', '')
-                
-                # Only add neighbors that are Tasks or form meaningful task-related paths
-                if neighbor_label == 'Task':
-                    connected.add(neighbor)
-                    self._add_task_context(neighbor, connected, max_nodes)
-                elif edge_label in ['HAS_TASK', 'RESPONSIBLE_TO', 'START_ON', 'DUE_ON', 'BASED_ON', 'LINKED_TO']:
+                if neighbor not in connected:
                     connected.add(neighbor)
                     
-                    # If this is a task, get its context
-                    if edge_label == 'HAS_TASK':
-                        self._add_task_context(neighbor, connected, max_nodes)
-                    # If this is a person, get their role/dept/org
-                    elif edge_label in ['RESPONSIBLE_TO', 'COLLABORATED_BY']:
-                        self._add_person_context(neighbor, connected, max_nodes)
-                elif edge_label in ['RESPONSIBLE_TO', 'COLLABORATED_BY']:
-                    self._add_person_context(neighbor, connected, max_nodes)
+                    # For systematic expansion, add neighbors to expand list
+                    neighbor_attrs = self.graph.nodes.get(neighbor, {})
+                    neighbor_label = neighbor_attrs.get('label', '')
+                    
+                    # Expand Task nodes to get their full context
+                    if neighbor_label == 'Task':
+                        to_expand.append(neighbor)
+                    # Expand Person nodes to get role hierarchy
+                    elif neighbor_label == 'Person':
+                        to_expand.append(neighbor)
             
-            # Check INCOMING edges (neighbor -> node) - this is what was missing!
-            for neighbor in self.graph.predecessors(node):
+            # Add all predecessors
+            for predecessor in self.graph.predecessors(current_node):
                 if len(connected) >= max_nodes:
                     break
-                    
-                edge_data = self.graph.get_edge_data(neighbor, node, {})
-                edge_label = edge_data.get('label', '')
-                neighbor_attrs = self.graph.nodes.get(neighbor, {})
-                neighbor_label = neighbor_attrs.get('label', '')
-                
-                # If a Task is responsible to this person, add the task
-                if neighbor_label == 'Task' and edge_label == 'RESPONSIBLE_TO':
-                    connected.add(neighbor)
-                    self._add_task_context(neighbor, connected, max_nodes)
-                # If this is a task pointing to this node, add it
-                elif neighbor_label == 'Task':
-                    connected.add(neighbor)
-                    self._add_task_context(neighbor, connected, max_nodes)
+                if predecessor not in connected:
+                    connected.add(predecessor)
         
         return connected
     
-    def _add_task_context(self, task_node: str, connected: set, max_nodes: int):
-        """Add task-related context: dates, summaries, owners."""
-        if len(connected) >= max_nodes or task_node not in self.graph:
-            return
-            
-        for neighbor in self.graph.neighbors(task_node):
-            if len(connected) >= max_nodes:
-                break
-            edge_data = self.graph.get_edge_data(task_node, neighbor, {})
-            edge_label = edge_data.get('label', '')
-            
-            # Follow schema: Task->Date, Task->Summary, Task->Person
-            if edge_label in ['START_ON', 'DUE_ON', 'BASED_ON', 'LINKED_TO', 'RESPONSIBLE_TO']:
-                connected.add(neighbor)
-                
-                # If person, add their organizational context
-                neighbor_attrs = self.graph.nodes.get(neighbor, {})
-                if neighbor_attrs.get('label') == 'Person':
-                    self._add_person_context(neighbor, connected, max_nodes)
-    
-    def _add_person_context(self, person_node: str, connected: set, max_nodes: int):
-        """Add person organizational context: role->dept->org."""
-        if len(connected) >= max_nodes or person_node not in self.graph:
-            return
-            
-        # Follow schema: Person->Role->Department->Organization
-        for role_node in self.graph.neighbors(person_node):
-            if len(connected) >= max_nodes:
-                break
-            edge_data = self.graph.get_edge_data(person_node, role_node, {})
-            if edge_data.get('label') == 'HAS_ROLE':
-                connected.add(role_node)
-                
-                for dept_node in self.graph.neighbors(role_node):
-                    if len(connected) >= max_nodes:
-                        break
-                    edge_data = self.graph.get_edge_data(role_node, dept_node, {})
-                    if edge_data.get('label') == 'BELONGS_TO':
-                        connected.add(dept_node)
-                        
-                        for org_node in self.graph.neighbors(dept_node):
-                            if len(connected) >= max_nodes:
-                                break
-                            edge_data = self.graph.get_edge_data(dept_node, org_node, {})
-                            if edge_data.get('label') == 'IS_IN':
-                                connected.add(org_node)
-    
-    def query(self, query: str) -> Dict:
-        """Main query function - simplified."""
+    def query(self, query: str, direct_only: bool = False) -> Dict:
+        """Topic-centered query for maximum accuracy."""
         if not self.load_graph_with_embeddings():
             return {
                 'query': query,
@@ -207,34 +123,48 @@ class GraphRAG:
                 'nodes': []
             }
         
-        # Step 1: Find semantically relevant nodes
-        relevant_nodes = self.semantic_search(query, top_k=3)
+        # Step 1: Try topic name matching first (highest accuracy)
+        topic_matches = self.search_topics_by_name(query, semantic_threshold=0.5)
         
-        if not relevant_nodes:
+        if topic_matches:
+            # Found topic name matches - use only the BEST match for topic-centered approach
+            best_topic = topic_matches[0]  # Take only the highest scoring topic
+            start_nodes = [best_topic[0]]  # Single topic only
+            all_nodes = self.expand_from_nodes(
+                start_nodes, max_nodes=15, direct_only=direct_only
+            )
+            confidence = best_topic[1]
+            
+            explanation = f"Found {len(all_nodes)} nodes from topic '{best_topic[0]}'"
+            if direct_only:
+                explanation += " (direct neighbors only)"
+            
             return {
                 'query': query,
-                'error': 'No relevant information found.',
-                'nodes': []
+                'relevant_nodes': [best_topic],  # Only the best topic
+                'all_nodes': list(all_nodes),
+                'confidence_score': round(confidence, 3),
+                'explanation': explanation,
+                'method': 'topic_name_search'
             }
         
-        # Step 2: Find connected nodes
-        start_nodes = [node for node, _ in relevant_nodes]
-        all_nodes = self.find_connected_nodes(start_nodes, max_nodes=8)
+        # No topic matches found - provide helpful error message
+        available_topics = [
+            "Interview Scheduling", "GenAI Engineer Recruitment", 
+            "Data Science Intern Opportunity", "Praxis Meeting Coordination", 
+            "TRACE Capstone Awards Event"
+        ]
+        topic_list = ", ".join(available_topics)
         
-        # Step 3: Calculate confidence based on semantic similarity
-        confidence = max(score for _, score in relevant_nodes) if relevant_nodes else 0.0
-        
-        # Step 4: Return comprehensive response
         return {
             'query': query,
-            'relevant_nodes': relevant_nodes,
-            'all_nodes': list(all_nodes),
-            'confidence_score': round(confidence, 3),
-            'explanation': f"Found {len(relevant_nodes)} relevant nodes, expanded to {len(all_nodes)} total"
+            'error': f'No topic found matching "{query}". Try one of these topics: {topic_list}.',
+            'nodes': [],
+            'method': 'no_match'
         }
     
     def visualize(self, query: str, result: Dict, output_path: str) -> str:
-        """Create visualization - simplified."""
+        """Simple visualization."""
         try:
             from pyvis.network import Network
         except ImportError:
@@ -244,187 +174,249 @@ class GraphRAG:
             return "No graph loaded"
         
         try:
-            net = Network(height="600px", width="100%", bgcolor="#ffffff", font_color="black")
+            net = Network(height="600px", width="100%")
             
-            # Get nodes to visualize - only show connected nodes
+            # Show only connected nodes
             nodes_to_show = set(result.get('all_nodes', []))
-            relevant_node_ids = {node for node, _ in result.get('relevant_nodes', [])}
-            
-            # Create subgraph and only keep nodes that have connections
             subgraph = self.graph.subgraph(nodes_to_show)
             
-            # Filter out isolated nodes (nodes with no edges in the subgraph)
-            connected_nodes = set()
-            for node in subgraph.nodes():
-                if subgraph.degree(node) > 0:  # Has at least one edge
-                    connected_nodes.add(node)
-            
-            # If no connected nodes, keep at least the relevant ones
-            if not connected_nodes:
-                connected_nodes = relevant_node_ids
-            
-            # Create final subgraph with only connected nodes
-            final_subgraph = subgraph.subgraph(connected_nodes)
-            
-            # Color map - simplified from old app
+            # Colors for topic-centered hierarchy
             colors = {
-                'Task': '#90EE90',      # Light green
-                'Person': '#87CEEB',    # Light sky blue  
-                'Topic': '#FFB6C1',     # Light pink
-                'Role': '#FFA500',      # Orange
-                'Department': '#9370DB', # Purple
-                'Organization': '#FA8072', # Salmon
-                'Date': '#D3D3D3',      # Light gray
-                'Summary': '#D3D3D3'    # Light gray
+                'Topic': '#FF6B9D',      # Pink - most important
+                'Task': '#90EE90',       # Light green
+                'Person': '#87CEEB',     # Sky blue  
+                'Role': '#FFA500',       # Orange
+                'Department': '#DDA0DD', # Plum
+                'Organization': '#F0E68C', # Khaki
+                'Date': '#D3D3D3',       # Light gray
+                'Summary': '#FFE4B5',    # Moccasin
+                'Email Index': '#E6E6FA' # Lavender
             }
             
-            # Add nodes - only connected ones
-            for node, attrs in final_subgraph.nodes(data=True):
+            # Add nodes with topic-centered sizing
+            for node, attrs in subgraph.nodes(data=True):
                 label = attrs.get('label', '')
                 name = attrs.get('name', str(node))
-                
-                # Color based on node type, size based on relevance
                 color = colors.get(label, '#BDC3C7')
                 
-                if node in relevant_node_ids:
-                    size = 30  # Larger for most relevant
+                # Topic-centered node sizing
+                if label == 'Topic':
+                    node_size = 50  # Largest - center of graph
+                elif label == 'Task':
+                    node_size = 35  # Second largest
+                elif label == 'Person':
+                    node_size = 25  # Medium
                 else:
-                    size = 25 if label in ['Task', 'Person', 'Topic'] else 15
+                    node_size = 20  # Smaller for support nodes
+                
+                # Simple display names - no embedding role in Person labels
+                if label == 'Task':
+                    display_name = name[:40] + "..." if len(name) > 40 else name
+                elif label == 'Summary':
+                    display_name = name[:50] + "..." if len(name) > 50 else name
+                else:
+                    display_name = name[:30] + "..." if len(name) > 30 else name
+                
+                # Create detailed tooltip with all attributes
+                tooltip_parts = [f"<b>{label}</b>: {name}"]
+                for key, value in attrs.items():
+                    if key not in ['label', 'name'] and value:
+                        tooltip_parts.append(f"{key}: {value}")
+                
+                # For Person nodes, add FULL role/dept/org info to tooltip
+                if label == 'Person':
+                    person_details = _get_person_details(self.graph, node)
+                    if person_details:
+                        details_clean = person_details.strip('() ')
+                        tooltip_parts.append(f"<b>Full Details:</b> {details_clean}")
+                
+                tooltip = "<br>".join(tooltip_parts)
+                
+                # Set node size based on type
+                if label == 'Task':
+                    node_size = 35
+                elif label == 'Person':
+                    node_size = 30
+                else:
+                    node_size = 20
                 
                 net.add_node(
                     node,
-                    label=name[:30] + "..." if len(name) > 30 else name,
-                    title=f"{label}: {name}",
+                    label=display_name,
+                    title=tooltip,
                     color=color,
-                    size=size
+                    size=node_size,
+                    font={'size': 14, 'color': 'black'}
                 )
             
-            # Add edges - only between connected nodes
-            for u, v, edge_attrs in final_subgraph.edges(data=True):
+            # Add edges
+            for u, v, edge_attrs in subgraph.edges(data=True):
                 edge_label = edge_attrs.get('label', '')
-                net.add_edge(u, v, label=edge_label, color="#34495E", width=2)
+                net.add_edge(u, v, label=edge_label)
             
-            # Configure and save
-            net.set_options('{"physics": {"enabled": true, "stabilization": {"iterations": 100}}}')
+            # Save
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            net.heading = f"GraphRAG Query: {query}"
+            net.heading = f"Query: {query}"
             net.save_graph(output_path)
             
             return output_path
             
         except Exception as e:
-            return f"Visualization error: {str(e)}"
+            return f"Error: {str(e)}"
     
+    def search_topics_by_name(self, query: str, semantic_threshold: float = 0.5) -> List[Tuple[str, float]]:
+        """Search for topics using semantic similarity for higher accuracy."""
+        if not self.graph or not self.node_embeddings:
+            return []
+        
+        # Encode the query
+        query_embedding = self.embedder.encode(query)
+        topic_matches = []
+        
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get('label') == 'Topic':
+                # Get the embedding for this topic node
+                if node in self.node_embeddings:
+                    topic_embedding = self.node_embeddings[node]
+                    
+                    # Calculate semantic similarity
+                    similarity = cosine_similarity([query_embedding], [topic_embedding])[0][0]
+                    
+                    # Only include topics with good semantic similarity
+                    if similarity >= semantic_threshold:
+                        topic_matches.append((node, similarity))
+        
+        return sorted(topic_matches, key=lambda x: x[1], reverse=True)
+
+    # Compatibility methods
     def query_with_semantic_reasoning(self, query: str) -> Dict:
-        """Compatibility method - same as query() but matches old API."""
         return self.query(query)
     
-    def visualize_query_results(
-        self, 
-        query: str, 
-        result: Dict, 
-        output_path: str
-    ) -> str:
-        """Compatibility method - same as visualize() but matches old API."""
+    def visualize_query_results(self, query: str, result: Dict, output_path: str) -> str:
         return self.visualize(query, result, output_path)
 
 
 def format_response(result: Dict) -> str:
-    """Format response into structured data that GPT can understand."""
+    """Format response like the old system with structured task details."""
     if 'error' in result:
         return result['error']
     
     if not result.get('all_nodes'):
-        return "No information found for your query."
+        return "No information found."
     
-    # Create structured response showing exactly what's in the graph
-    response_parts = []
-    
-    # Load graph to get detailed node information
     try:
         import pickle
         with open("topic_graph.gpickle", "rb") as f:
             graph = pickle.load(f)
         
-        # Categorize nodes by type for clear presentation
+        # Find all tasks in the result
         tasks = []
-        people = []
-        dates = []
-        topics = []
-        
         for node in result.get('all_nodes', []):
             if node in graph:
                 attrs = graph.nodes[node]
-                label = attrs.get('label', '')
-                name = attrs.get('name', str(node))
-                
-                if label == 'Task':
-                    # Get task details with dates, owners, and collaborators
-                    task_info = {'name': name, 'dates': [], 'owners': [], 'collaborators': []}
-                    for neighbor in graph.neighbors(node):
-                        edge_data = graph.get_edge_data(node, neighbor, {})
-                        edge_label = edge_data.get('label', '')
-                        neighbor_attrs = graph.nodes[neighbor]
-                        neighbor_name = neighbor_attrs.get('name', neighbor)
-                        
-                        if edge_label in ['START_ON', 'DUE_ON']:
-                            task_info['dates'].append(f"{edge_label}: {neighbor_name}")
-                        elif edge_label == 'RESPONSIBLE_TO':
-                            task_info['owners'].append(neighbor_name)
-                        elif edge_label == 'COLLABORATED_BY':
-                            task_info['collaborators'].append(neighbor_name)
-                    
-                    tasks.append(task_info)
-                    
-                elif label == 'Person':
-                    people.append(name)
-                elif label == 'Date':
-                    dates.append(name)
-                elif label == 'Topic':
-                    topics.append(name)
+                if attrs.get('label') == 'Task':
+                    tasks.append(node)
         
-        # Format structured output
-        if tasks:
-            response_parts.append("📋 **Tasks Found:**")
-            for task in tasks:
-                task_line = f"• {task['name']}"
-                if task['dates']:
-                    task_line += f" | {', '.join(task['dates'])}"
-                if task['owners']:
-                    task_line += f" | Owner: {', '.join(task['owners'])}"
-                if task['collaborators']:
-                    task_line += f" | Collaborators: {', '.join(task['collaborators'])}"
-                response_parts.append(task_line)
+        if not tasks:
+            return "No tasks found in the results."
         
-        if people:
-            response_parts.append(f"\n👥 **People Involved:** {', '.join(people)}")
+        # Format each task in the structured format
+        response_parts = []
         
-        if dates:
-            response_parts.append(f"\n📅 **Dates Found:** {', '.join(dates)}")
+        for task_node in tasks:
+            task_attrs = graph.nodes[task_node]
+            task_name = task_attrs.get('name', str(task_node))
             
-        if topics:
-            response_parts.append(f"\n🏷️ **Topics:** {', '.join(topics)}")
+            task_info = [f"**Task:** {task_name}"]
+            
+            # Find the topic for this task
+            for neighbor in graph.neighbors(task_node):
+                edge_data = graph.get_edge_data(task_node, neighbor, {})
+                edge_label = edge_data.get('label', '')
+                neighbor_attrs = graph.nodes[neighbor]
+                
+                if neighbor_attrs.get('label') == 'Topic':
+                    topic_name = neighbor_attrs.get('name', neighbor)
+                    task_info.append(f"**Topic:** {topic_name}")
+                    break
+            
+            # Get all the direct neighbors with their relationships
+            for neighbor in graph.neighbors(task_node):
+                edge_data = graph.get_edge_data(task_node, neighbor, {})
+                edge_label = edge_data.get('label', '')
+                neighbor_attrs = graph.nodes[neighbor]
+                neighbor_name = neighbor_attrs.get('name', neighbor)
+                neighbor_label = neighbor_attrs.get('label', '')
+                
+                if edge_label == 'START_ON':
+                    task_info.append(f"   • **Start Date:** {neighbor_name}")
+                elif edge_label == 'DUE_ON':
+                    task_info.append(f"   • **Due Date:** {neighbor_name}")
+                elif edge_label == 'BASED_ON' or neighbor_label == 'Summary':
+                    task_info.append(f"   • **Summary:** {neighbor_name}")
+                elif edge_label == 'LINKED_TO' or neighbor_label == 'Email Index':
+                    task_info.append(f"   • **Email Index:** {neighbor_name}")
+                elif edge_label == 'RESPONSIBLE_TO':
+                    # Get role/dept/org info for the person
+                    person_details = _get_person_details(graph, neighbor)
+                    task_info.append(f"   • **Responsible To:** {neighbor_name}{person_details}")
+                elif edge_label == 'COLLABORATED_BY':
+                    person_details = _get_person_details(graph, neighbor)
+                    task_info.append(f"   • **Collaborated By:** {neighbor_name}{person_details}")
+            
+            response_parts.append("\n".join(task_info))
         
-        # Add confidence
+        # Add confidence at the end
         confidence = result.get('confidence_score', 0.0)
-        confidence_text = "🟢 High" if confidence > 0.7 else "🟡 Medium" if confidence > 0.4 else "🔴 Low"
-        response_parts.append(f"\n**Confidence:** {confidence_text} ({confidence})")
+        conf_text = "🟢 High" if confidence > 0.7 else "🟡 Medium" if confidence > 0.4 else "🔴 Low"
+        response_parts.append(f"\n**Confidence:** {conf_text} ({confidence})")
         
-        return "\n".join(response_parts)
+        return "\n\n".join(response_parts)
         
-    except Exception:
-        # Fallback to simple response if detailed analysis fails
-        explanation = result.get('explanation', '')
-        return f"📊 {explanation}\n\nFound relevant information in the knowledge graph."
+    except Exception as e:
+        return f"📊 Error formatting response: {str(e)}"
+
+def _get_person_details(graph, person_node):
+    """Get role, department, organization details for a person."""
+    details = []
+    
+    for neighbor in graph.neighbors(person_node):
+        edge_data = graph.get_edge_data(person_node, neighbor, {})
+        edge_label = edge_data.get('label', '')
+        neighbor_attrs = graph.nodes[neighbor]
+        
+        if edge_label == 'HAS_ROLE' or neighbor_attrs.get('label') == 'Role':
+            role_name = neighbor_attrs.get('name', neighbor)
+            details.append(f"Role: {role_name}")
+            
+            # Get department for this role
+            for dept_neighbor in graph.neighbors(neighbor):
+                dept_edge = graph.get_edge_data(neighbor, dept_neighbor, {})
+                dept_edge_label = dept_edge.get('label', '')
+                dept_attrs = graph.nodes[dept_neighbor]
+                
+                if dept_edge_label == 'BELONGS_TO' or dept_attrs.get('label') == 'Department':
+                    dept_name = dept_attrs.get('name', dept_neighbor)
+                    details.append(f"Department: {dept_name}")
+                    
+                    # Get organization for this department
+                    for org_neighbor in graph.neighbors(dept_neighbor):
+                        org_edge = graph.get_edge_data(dept_neighbor, org_neighbor, {})
+                        org_edge_label = org_edge.get('label', '')
+                        org_attrs = graph.nodes[org_neighbor]
+                        
+                        if org_edge_label == 'IS_IN' or org_attrs.get('label') == 'Organization':
+                            org_name = org_attrs.get('name', org_neighbor)
+                            details.append(f"Organization: {org_name}")
+                            break
+                    break
+            break
+    
+    if details:
+        return f" ({', '.join(details)})"
+    return ""
 
 
 def format_graphrag_response(result: Dict) -> str:
-    """Compatibility function - same as format_response() but matches old API."""
+    """Compatibility function."""
     return format_response(result)
-
-
-# Simple usage example:
-# rag = GraphRAG()
-# result = rag.query("Who is Rachel?")
-# response_text = format_response(result)
-# viz_path = rag.visualize("Who is Rachel?", result, "static/simple_viz.html")
