@@ -4,6 +4,51 @@ import streamlit as st
 import pandas as pd
 import json
 
+
+def check_environment():
+    """Check environment variable status for deployment debugging"""
+    openai_key = os.getenv("OPENAI_API_KEY")
+    
+    if not openai_key:
+        st.error("""
+        🚨 **Missing OPENAI_API_KEY Environment Variable**
+        
+        The task extraction requires an OpenAI API key to function.
+        
+        **For Hugging Face Spaces:**
+        1. Go to your Space settings
+        2. Click on "Repository secrets"
+        3. Add `OPENAI_API_KEY` with your OpenAI API key
+        4. Restart your Space
+        
+        **For local development:**
+        - Create a `.env` file with `OPENAI_API_KEY=your_key_here`
+        - Or set the environment variable in your shell
+        """)
+        return False
+    
+    # Show environment status for debugging
+    with st.expander("🔍 Environment Status (Debug Info)"):
+        key_display = (openai_key[:10] + "..." if openai_key
+                       else "❌ Not found")
+        st.write("✅ OPENAI_API_KEY found:", key_display)
+        st.write("🐍 Python version:", sys.version)
+        st.write("📂 Working directory:", os.getcwd())
+        st.write("🌍 Platform:", os.name)
+        
+        # Show other API-related environment variables
+        api_vars = {k: v for k, v in os.environ.items()
+                    if 'API' in k.upper() or 'KEY' in k.upper()}
+        if api_vars:
+            st.write("🔑 Available API environment variables:")
+            for key in sorted(api_vars.keys()):
+                value = ("***" if key.endswith('_KEY')
+                         else api_vars[key][:20] + "...")
+                st.write(f"  - {key}: {value}")
+    
+    return True
+
+
 # Configure Streamlit for large file uploads BEFORE any other operations
 try:
     # Set configuration for maximum upload size
@@ -54,6 +99,11 @@ except ImportError as e:
     st.error(f"Import error: {e}")
     st.error("Please ensure all utils files are properly uploaded to your Hugging Face Space")
     st.stop()
+
+# Check environment variables and show warnings if needed
+if not check_environment():
+    st.warning("⚠️ Application may not work correctly without proper API keys")
+    st.info("You can still upload and parse emails, but extraction will fail")
 
 
 def flatten_extractions(json_list):
