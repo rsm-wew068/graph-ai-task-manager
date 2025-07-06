@@ -6,7 +6,7 @@ textColor = "#262730"
 
 [server]
 headless = true
-port = 7860
+port = 8501
 maxUploadSize = 1000
 maxMessageSize = 1000
 enableCORS = false
