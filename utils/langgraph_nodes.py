@@ -20,7 +20,7 @@ openai_key = os.getenv("OPENAI_API_KEY")
 
 
 def get_llm():
-    return ChatOpenAI(model="gpt-4o", temperature=0.2,
+    return ChatOpenAI(model="gpt-4", temperature=0.2,
                       openai_api_key=openai_key)
 
 
