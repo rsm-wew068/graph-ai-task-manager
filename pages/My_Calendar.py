@@ -7,9 +7,6 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-print(f"My_Calendar - Parent directory: {parent_dir}")
-print(f"Utils directory exists: {os.path.exists(os.path.join(parent_dir, 'utils'))}")
-
 import streamlit as st
 import pandas as pd
 from streamlit_calendar import calendar
@@ -18,13 +15,25 @@ import json
 
 st.set_page_config(page_title="🗓 Calendar View", layout="wide")
 
-# Custom CSS for Google Calendar-like styling
+# Custom CSS for Google Calendar-like styling with modal popup
 st.markdown("""
 <style>
     .task-event {
         border-radius: 4px !important;
         font-size: 12px !important;
         padding: 2px 4px !important;
+        cursor: pointer !important;
+    }
+    
+    /* Ensure all calendar events are clickable */
+    .fc-event {
+        cursor: pointer !important;
+    }
+    
+    .fc-event:hover {
+        opacity: 0.8 !important;
+        transform: scale(1.02) !important;
+        transition: all 0.2s ease !important;
     }
     
     .fc-event-title {
@@ -49,14 +58,164 @@ st.markdown("""
     .stApp > div:first-child {
         padding-top: 1rem;
     }
+    
+    /* Modal styling for task popup */
+    .task-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 9999;
+        display: none; /* Initially hidden */
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(2px);
+    }
+    
+    .task-modal-content {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: relative;
+        animation: modalSlideIn 0.3s ease-out;
+        transform: scale(0.9);
+        opacity: 0;
+        transition: all 0.3s ease;
+    }
+    
+    .task-modal[style*="flex"] .task-modal-content {
+        transform: scale(1);
+        opacity: 1;
+    }
+    
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: scale(0.9) translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+    }
+    
+    .task-modal-header {
+        background: linear-gradient(135deg, #1976d2, #42a5f5);
+        color: white;
+        padding: 20px;
+        border-radius: 12px 12px 0 0;
+        position: relative;
+    }
+    
+    .task-modal-close {
+        position: absolute;
+        top: 15px;
+        right: 20px;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.8;
+        transition: all 0.2s ease;
+    }
+    
+    .task-modal-close:hover {
+        opacity: 1;
+        background-color: rgba(255, 255, 255, 0.1);
+        transform: scale(1.1);
+    }
+    
+    .task-modal-body {
+        padding: 24px;
+    }
+    
+    .task-detail-section {
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .task-detail-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+    
+    .task-detail-label {
+        font-weight: 600;
+        color: #666;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    
+    .task-detail-value {
+        font-size: 14px;
+        color: #333;
+        line-height: 1.5;
+    }
+    
+    .task-tag {
+        display: inline-block;
+        background: #f5f5f5;
+        color: #666;
+        padding: 4px 8px;
+        border-radius: 16px;
+        font-size: 12px;
+        margin-right: 8px;
+        margin-bottom: 4px;
+    }
+    
+    .task-date-badge {
+        background: linear-gradient(135deg, #4caf50, #66bb6a);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-right: 8px;
+    }
+    
+    .task-due-badge {
+        background: linear-gradient(135deg, #ff9800, #ffb74d);
+        color: white;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-right: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🗓 Task Calendar View")
 
-# Initialize session state for selected task
+# Initialize session state for modal and selected task
 if "selected_task" not in st.session_state:
     st.session_state.selected_task = None
+if "show_task_modal" not in st.session_state:
+    st.session_state.show_task_modal = False
+if "last_clicked_event" not in st.session_state:
+    st.session_state.last_clicked_event = None
+
+
+def load_tasks_from_session():
+    """Load and validate tasks from session state"""
+
 
 # Try to load extracted tasks from session state
 if (hasattr(st.session_state, 'processing_complete') and
@@ -85,7 +244,7 @@ if tasks is None:
         "and process emails."
     )
 else:
-    st.subheader("� Task Calendar")
+    st.subheader("📅 Task Calendar")
     st.markdown("*Click on any task to see detailed information*")
 
     # Convert tasks to event format
@@ -107,7 +266,8 @@ else:
                 
             # Navigate the nested structure: validated_json > Topic > tasks
             topic = task_data.get("Topic", {})
-            topic_name = topic.get("name", "Unknown Topic") if isinstance(topic, dict) else "Unknown Topic"
+            topic_name = (topic.get("name", "Unknown Topic")
+                          if isinstance(topic, dict) else "Unknown Topic")
             topic_tasks = topic.get("tasks", [])
             
             for task_obj in topic_tasks:
@@ -136,6 +296,11 @@ else:
                     owner_name = str(owner) if owner else "Unknown"
                     owner_role = owner_dept = owner_org = ""
                 
+                # Handle collaborators
+                collaborators = task.get("collaborators", [])
+                if not isinstance(collaborators, list):
+                    collaborators = []
+                
                 # Use due_date or start_date for the calendar event
                 event_date = due_date or start_date
                 
@@ -145,24 +310,17 @@ else:
                     
                     # Determine event type and styling
                     is_start_event = bool(start_date)
-                    event_color = "#1976d2" if is_start_event else "#f57c00"  # Blue for start, Orange for due
-                    
+                    # Blue for start, Orange for due
+                    event_color = "#1976d2" if is_start_event else "#f57c00"
+                
                     event = {
                         "id": event_id,
                         "title": task_name,
                         "start": event_date,
-                        "end": event_date,
                         "allDay": True,
                         "backgroundColor": event_color,
                         "borderColor": event_color,
-                        "textColor": "#ffffff",
-                        "classNames": ["task-event"],
-                        "extendedProps": {
-                            "task_type": "Start" if is_start_event else "Due",
-                            "owner": owner_name,
-                            "topic": topic_name,
-                            "summary": summary[:50] + "..." if len(summary) > 50 else summary
-                        }
+                        "textColor": "#ffffff"
                     }
                     events.append(event)
                     
@@ -175,9 +333,10 @@ else:
                         "due_date": due_date,
                         "owner_name": owner_name,
                         "owner_role": owner_role,
-                        "owner_dept": owner_dept,
-                        "owner_org": owner_org,
+                        "owner_department": owner_dept,
+                        "owner_organization": owner_org,
                         "email_index": email_index,
+                        "collaborators": collaborators,
                         "event_type": "Start" if start_date else "Due"
                     }
                     
@@ -189,121 +348,156 @@ else:
         "initialView": "dayGridMonth",
         "editable": False,
         "selectable": True,
-        "displayEventTime": True,
-        "eventDisplay": "block",
+        "selectMirror": True,
         "dayMaxEvents": 3,
-        "moreLinkClick": "popover",
+        "weekends": True,
+        "navLinks": True,
         "headerToolbar": {
             "start": "prev,next today",
             "center": "title",
             "end": "dayGridMonth,timeGridWeek,timeGridDay"
         },
-        "height": "auto",
-        "aspectRatio": 1.35,
-        "eventClick": {
-            "enabled": True
-        },
-        "eventMouseEnter": {
-            "enabled": True
+        "height": 650,
+        "businessHours": {
+            "daysOfWeek": [1, 2, 3, 4, 5],
+            "startTime": "08:00",
+            "endTime": "18:00",
         }
     }
 
     # Show summary stats
-    st.info(f"� Displaying {len(events)} tasks from {len(tasks)} processed emails")
+    event_count = len(events)
+    task_count = len(tasks)
+    st.info(f"📊 Displaying {event_count} tasks from {task_count} emails")
     
-    # Create layout: full-width calendar with side panel for details
+    # Create full-width calendar - just like Google Calendar
     if events:
-        col1, col2 = st.columns([3, 1])
+        # Render the calendar with unique key to prevent state persistence issues
+        calendar_key = f"calendar_{event_count}_{hash(str(events))}"
+        calendar_result = calendar(
+            events=events,
+            options=calendar_options,
+            custom_css="""
+            .fc-event {
+                cursor: pointer !important;
+            }
+            .fc-event:hover {
+                opacity: 0.8 !important;
+                transform: scale(1.02) !important;
+            }
+            """,
+            key=calendar_key
+        )
         
-        with col1:
-            # Render the calendar
-            calendar_result = calendar(
-                events=events, 
-                options=calendar_options, 
-                key="calendar"
-            )
-            
-            # Handle calendar interactions
-            if calendar_result.get("eventClick"):
-                event_id = calendar_result["eventClick"]["event"]["id"]
-                st.session_state.selected_task = event_id
-                st.rerun()
+        # Debug: Show what calendar_result contains
+        if calendar_result and st.checkbox("🐛 Show Debug Info", key="debug_toggle"):
+            st.write("Calendar result:")
+            st.json(calendar_result)
         
-        with col2:
-            st.markdown("### 📋 Task Details")
+        # Handle calendar interactions - Google Calendar style (no page refresh)
+        if calendar_result.get("eventClick"):
+            event_info = calendar_result["eventClick"]["event"]
+            event_id = event_info.get("id")
             
-            if (st.session_state.selected_task and 
+            # Prevent duplicate processing of the same click
+            if event_id != st.session_state.last_clicked_event:
+                st.session_state.last_clicked_event = event_id
+                
+                if event_id and event_id in task_details:
+                    st.session_state.selected_task = event_id
+                    st.session_state.show_task_modal = True
+                    # Remove st.rerun() - let Streamlit handle it naturally
+                else:
+                    st.error(f"Event ID {event_id} not found in task_details")
+        
+        # Show task details when a task is clicked
+        if (st.session_state.show_task_modal and
+            st.session_state.selected_task and
                 st.session_state.selected_task in task_details):
-                task_info = task_details[st.session_state.selected_task]
+            
+            task_info = task_details[st.session_state.selected_task]
+            
+            # Comprehensive task details in expandable format
+            with st.expander("📝 Task Details", expanded=True):
+                st.markdown(f"**Task:** {task_info['task_name']}")
+                st.markdown(f"**Topic:** {task_info['topic']}")
                 
-                # Task header
-                st.markdown(f"**{task_info['task_name']}**")
-                st.caption(f"{task_info['event_type']} Date • {task_info['topic']}")
+                # Dates with bullet points
+                if task_info['start_date']:
+                    st.markdown(f"• **Start Date:** {task_info['start_date']}")
+                if task_info['due_date']:
+                    st.markdown(f"• **Due Date:** {task_info['due_date']}")
                 
-                # Key information in compact format
+                # Summary
                 if task_info['summary']:
-                    st.markdown(f"📝 {task_info['summary']}")
+                    st.markdown(f"• **Summary:** {task_info['summary']}")
                 
-                # Dates
-                col_start, col_due = st.columns(2)
-                with col_start:
-                    if task_info['start_date']:
-                        st.metric("Start", task_info['start_date'])
-                with col_due:
-                    if task_info['due_date']:
-                        st.metric("Due", task_info['due_date'])
+                # Email Index
+                if task_info.get('email_index'):
+                    st.markdown(f"• **Email Index:** {task_info['email_index']}")
                 
-                # Owner info
-                st.markdown(f"👤 **{task_info['owner_name']}**")
-                if task_info['owner_role']:
-                    st.caption(task_info['owner_role'])
+                # Responsible To (Owner) - with complete role details
+                owner_name = task_info['owner_name']
+                owner_role = task_info.get('owner_role', 'Unknown')
+                owner_dept = task_info.get('owner_department', 'Unknown') 
+                owner_org = task_info.get('owner_organization', 'Unknown')
                 
-                # Action button
-                if st.button("🔍 More Context", 
-                           key=f"ctx_{st.session_state.selected_task}"):
-                    from utils.graphrag import (GraphRAG, 
-                                              format_graphrag_response)
+                responsible_to = f"{owner_name}"
+                if owner_role != 'Unknown' or owner_dept != 'Unknown' or owner_org != 'Unknown':
+                    role_details = []
+                    if owner_role != 'Unknown':
+                        role_details.append(f"Role: {owner_role}")
+                    if owner_dept != 'Unknown':
+                        role_details.append(f"Department: {owner_dept}")
+                    if owner_org != 'Unknown':
+                        role_details.append(f"Organization: {owner_org}")
                     
-                    try:
-                        graphrag = GraphRAG()
-                        query = (f"Tell me about task "
-                               f"'{task_info['task_name']}'")
-                        result = graphrag.query_with_semantic_reasoning(query)
-                        formatted = format_graphrag_response(result)
-                        
-                        with st.expander("🧠 AI Context", expanded=True):
-                            st.markdown(formatted)
+                    if role_details:
+                        responsible_to += f" ({', '.join(role_details)})"
+                
+                st.markdown(f"• **Responsible To:** {responsible_to}")
+                
+                # Collaborated By (Collaborators) - with complete details for each
+                if task_info.get('collaborators'):
+                    collab_list = []
+                    for collab in task_info['collaborators']:
+                        if isinstance(collab, dict):
+                            collab_name = collab.get('name', 'Unknown')
+                            collab_role = collab.get('role', 'Unknown')
+                            collab_dept = collab.get('department', 'Unknown')
+                            collab_org = collab.get('organization', 'Unknown')
                             
-                    except Exception as e:
-                        st.error(f"Context error: {e}")
-            else:
-                st.info("👆 Click a task to see details")
-                
-                # Quick task list
-                if events:
-                    st.markdown("**All Tasks:**")
-                    for event in events[:5]:  # Show first 5
-                        event_id = event.get("id")
-                        if event_id in task_details:
-                            task_info = task_details[event_id]
-                            if st.button(
-                                f"📌 {task_info['task_name'][:25]}...", 
-                                key=f"sel_{event_id}"
-                            ):
-                                st.session_state.selected_task = event_id
-                                st.rerun()
+                            collab_details = f"{collab_name}"
+                            if collab_role != 'Unknown' or collab_dept != 'Unknown' or collab_org != 'Unknown':
+                                role_parts = []
+                                if collab_role != 'Unknown':
+                                    role_parts.append(f"Role: {collab_role}")
+                                if collab_dept != 'Unknown':
+                                    role_parts.append(f"Department: {collab_dept}")
+                                if collab_org != 'Unknown':
+                                    role_parts.append(f"Organization: {collab_org}")
+                                
+                                if role_parts:
+                                    collab_details += f" ({', '.join(role_parts)})"
+                            
+                            collab_list.append(collab_details)
+                        else:
+                            collab_list.append(str(collab))
                     
-                    if len(events) > 5:
-                        st.caption(f"... and {len(events) - 5} more tasks")
+                    if collab_list:
+                        st.markdown(f"• **Collaborated By:** {', '.join(collab_list)}")
+                    else:
+                        st.markdown(f"• **Collaborated By:** None")
+                else:
+                    st.markdown(f"• **Collaborated By:** None")
+            
+            # Simple close button
+            if st.button("✖ Close Task Details", key="close_modal_simple",
+                         type="primary", use_container_width=True):
+                st.session_state.show_task_modal = False
+                st.session_state.selected_task = None
+                st.session_state.last_clicked_event = None
     else:
         st.warning("No tasks with valid dates found.")
-
-    # Optional: Show technical details for debugging
-    with st.expander("� Technical Details", expanded=False):
-        st.write(f"**Total events:** {len(events)}")
-        st.write(f"**Events with dates:** {len([e for e in events if e.get('start')])}")
-        
-        if events:
-            st.write("**Sample events:**")
-            for i, event in enumerate(events[:3]):
-                st.write(f"• {event['title']} - {event['start']}")
+        st.info("Tasks will appear here once you process emails with "
+                "valid dates.")
