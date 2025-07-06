@@ -57,7 +57,7 @@ for message in st.session_state.chat_history:
     st.chat_message("assistant").write(message["assistant"])
 
 # Get new user input
-if user_query := st.chat_input("Ask a task-related question..."):
+if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
     st.chat_message("user").write(user_query)
 
     # Run LangGraph reasoning pipeline
@@ -68,10 +68,82 @@ if user_query := st.chat_input("Ask a task-related question..."):
     # Show assistant response
     st.chat_message("assistant").write(answer)
 
-    # Show extracted reasoning as expandable
-    with st.expander("🔍 Show Graph Reasoning Context"):
-        st.markdown("#### Topic Observation")
-        st.text(observation)
+    # Show extracted reasoning as expandable with beautiful visualization
+    with st.expander("🔍 Show Query-Focused Graph Visualization"):
+        try:
+            # Generate GraphRAG visualization
+            from utils.graphrag import GraphRAG
+            
+            # Create GraphRAG instance and run the query to get result data
+            rag = GraphRAG()
+            if rag.load_graph_with_embeddings():
+                # Re-run the query to get the structured result for visualization
+                graphrag_result = rag.query_with_semantic_reasoning(user_query)
+                
+                # Generate visualization
+                viz_filename = f"chat_viz_{len(st.session_state.chat_history)}.html"
+                viz_path = rag.visualize_query_results(
+                    user_query, 
+                    graphrag_result, 
+                    f"static/{viz_filename}"
+                )
+                
+                # Display the visualization in Streamlit
+                if viz_path and os.path.exists(viz_path):
+                    st.markdown("### 🔍 Query Analysis Visualization")
+                    st.markdown(f"**Query:** {user_query}")
+                    st.markdown(f"**Confidence:** {graphrag_result.get('confidence_score', 0):.3f}")
+                    
+                    # Show the interactive graph
+                    with open(viz_path, 'r', encoding='utf-8') as f:
+                        html_content = f.read()
+                    st.components.v1.html(html_content, height=600, scrolling=True)
+                    
+                    # Show summary stats based on the actual GraphRAG result
+                    # Count nodes by type from the graph result
+                    tasks_count = 0
+                    people_count = 0
+                    dates_count = 0
+                    
+                    try:
+                        import pickle
+                        with open("topic_graph.gpickle", "rb") as f:
+                            graph = pickle.load(f)
+                        
+                        for node in graphrag_result.get('all_nodes', []):
+                            if node in graph:
+                                attrs = graph.nodes[node]
+                                label = attrs.get('label', '')
+                                if label == 'Task':
+                                    tasks_count += 1
+                                elif label == 'Person':
+                                    people_count += 1
+                                elif label == 'Date':
+                                    dates_count += 1
+                    except Exception:
+                        # Fallback: try to parse from old evidence format
+                        evidence = graphrag_result.get('evidence', {})
+                        tasks_count = len(evidence.get('tasks', []))
+                        people_count = len(evidence.get('people', []))
+                        dates_count = len(evidence.get('deadlines', []))
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("📋 Tasks Found", tasks_count)
+                    with col2:
+                        st.metric("👥 People Found", people_count)
+                    with col3:
+                        st.metric("📅 Deadlines Found", dates_count)
+                else:
+                    st.error("Could not generate visualization")
+            else:
+                st.warning("Graph not loaded. Please process emails first.")
+                
+        except Exception as e:
+            st.error(f"Visualization error: {e}")
+            # Fallback to text display
+            st.markdown("#### 📝 Text Context (Fallback)")
+            st.text(observation)
 
     # Save to chat history
     st.session_state.chat_history.append({
