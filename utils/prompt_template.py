@@ -140,9 +140,10 @@ EXTRACTION GUIDELINES:
 
 3. DEADLINE EXTRACTION: Look for dates in:
    - Email content mentioning "due", "deadline", "by [date]", "before"
-   - Email sent date is the start date if not mentioned in the content
    - Subject line dates or urgency indicators
    - Email timestamps as context for relative dates ("by Friday", "next week")
+   - FALLBACK: If no start date is mentioned in the email content, use the 
+     email's sent date as the start_date
 
 3. TASK CONTEXT: Use subject line and email metadata to understand:
    - Priority level from subject indicators (URGENT, FYI, etc.)
