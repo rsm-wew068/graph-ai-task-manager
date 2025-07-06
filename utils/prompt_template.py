@@ -2,17 +2,24 @@ from langchain.prompts import PromptTemplate
 
 # Prompt for reasoning
 reason_prompt = PromptTemplate.from_template("""
-You are a helpful assistant supporting task management.
-Given a user's question and a factual observation (task data from a knowledge graph),
-your job is to respond clearly with:
-- The tasks and the deadlines the user needs to focus on
-- Any recommendation you have based on the data
-- If the current date is past the due date, suggest a polite follow-up email to the task owner and cc the collaborators to check on the status, otherwise, you don't need to suggest a follow-up email.
-Only use information from the observation. Do not invent tasks or timelines.
+You are a helpful assistant with access to task management data from a knowledge graph.
+
+First, analyze the user's question to determine its intent:
+- If it's about tasks, deadlines, projects, or work-related queries, use the task data provided
+- If it's a general question unrelated to task management, answer normally without forcing task information
+
+For task management questions, respond with:
+- The relevant tasks and deadlines the user needs to focus on
+- Any recommendations based on the data
+- If the current date is past the due date, suggest a polite follow-up email to the task owner and cc the collaborators to check on the status
+
+For general questions, provide a helpful answer based on your knowledge, and only mention tasks if they're genuinely relevant.
+
+Only use information from the observation for task-related responses. Do not invent tasks or timelines.
 
 Today's date: {current_date}
 
-Context:
+Task Management Context (use only if relevant to the question):
 {observation}
 
 User Question:
@@ -101,24 +108,60 @@ example_json = '''{{
 }}'''
 
 rag_extraction_prompt = PromptTemplate.from_template(f"""
-You are reviewing a group of emails that belong to the same topic.
-
-Each email contains exactly one task.
+You are reviewing an email that contains task-related information.
 
 Your task is to:
-- Assign a specific topic name (1–3 words)
-- Extract topic metadata (start date, due date, description, owner(s), collaborators)
-- Extract one task from each email (email_index, name, summary)
-- Return valid structured JSON like this:
+- Extract ONE actionable task from the main email
+- Use all available email metadata (sender, recipients, dates, subject) to
+  enrich the task details
+- Identify the task owner from email participants (From, To, Cc fields)
+- Extract or infer task deadlines from the email content and context
+- Return valid structured JSON
+
+EMAIL TO ANALYZE:
+\"\"\"
+{{main_email}}
+\"\"\"
+
+RELATED CONTEXT (for reference only):
+{{related_email_1}}
+
+{{related_email_2}}
+
+EXTRACTION GUIDELINES:
+1. EMAIL_INDEX: Message-ID is email_index
+   - Use the Message-ID field from email metadata as the email_index value
+
+2. OWNER IDENTIFICATION: Use email metadata to identify task owners:
+   - The "Name-From" field often indicates who is assigning or reporting on the task
+   - The "Name-To" field indicates primary recipients/responsible parties
+   - If names are not in headers, parse from email signatures/content
+   - You must return a name. If you cannot identify it from the email content, you should extract it from Name-From, Name-To fields
+
+3. DEADLINE EXTRACTION: Look for dates in:
+   - Email content mentioning "due", "deadline", "by [date]", "before"
+   - Email sent date is the start date if not mentioned in the content
+   - Subject line dates or urgency indicators
+   - Email timestamps as context for relative dates ("by Friday", "next week")
+
+3. TASK CONTEXT: Use subject line and email metadata to understand:
+   - Priority level from subject indicators (URGENT, FYI, etc.)
+   - Department/team context from sender domains and signatures
+   - Project/topic context from subject prefixes or email threads
+
+4. COLLABORATORS: Identify from From/To/Cc/Bcc fields and email content mentions
+
+OUTPUT FORMAT: Return ONLY valid JSON (no markdown, no comments):
 
 {example_json}
 
 CRITICAL JSON FORMATTING RULES:
 - Use double quotes for all strings
 - Add commas after every property except the last one
-- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2" 
+- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2"
 - Do not include markdown, backticks, or comments
 - Ensure all braces and brackets are properly closed
+- Use null for missing dates, not empty strings
 
 Context:
 \"\"\"
