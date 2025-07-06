@@ -79,9 +79,14 @@ def flatten_extractions(json_list):
         # Skip non-dict items (None, etc.)
         if not isinstance(item, dict):
             continue
+        
+        # Handle validated_json wrapper from HITL validation
+        if "validated_json" in item:
+            item = item["validated_json"]
             
         topic = item.get("Topic", {})
-        topic_name = topic.get("name", "Unknown Topic") if isinstance(topic, dict) else "Unknown Topic"
+        topic_name = (topic.get("name", "Unknown Topic")
+                      if isinstance(topic, dict) else "Unknown Topic")
         
         tasks = topic.get("tasks", []) if isinstance(topic, dict) else []
         for task_obj in tasks:
@@ -92,19 +97,28 @@ def flatten_extractions(json_list):
             if not isinstance(task, dict):
                 continue
                 
+            # Extract comprehensive owner information
             owner = task.get("owner", {})
             if isinstance(owner, dict):
                 owner_name = owner.get("name", "Unknown")
+                owner_role = owner.get("role", "")
+                owner_dept = owner.get("department", "")
+                owner_org = owner.get("organization", "")
             else:
                 owner_name = str(owner) if owner else "Unknown"
+                owner_role = owner_dept = owner_org = ""
             
+            # Extract all task details for comprehensive display
             rows.append({
                 "Topic": topic_name,
                 "Task Name": task.get("name", "Unnamed Task"),
                 "Summary": task.get("summary", ""),
                 "Start Date": task.get("start_date", ""),
                 "Due Date": task.get("due_date", ""),
-                "Owner": owner_name,
+                "Owner Name": owner_name,
+                "Owner Role": owner_role,
+                "Owner Department": owner_dept,
+                "Owner Organization": owner_org,
                 "Email Index": task_obj.get("email_index", "")
             })
     return pd.DataFrame(rows)
@@ -336,6 +350,7 @@ if uploaded_file is not None:
         "max_emails_limit": max_emails_limit,
         "exclude_types": exclude_types
     }
+    st.session_state.filter_settings = filter_settings
     
     # Parse emails button
     if st.button("📊 Parse Emails with Filters"):
@@ -355,10 +370,12 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
     df_emails = st.session_state.parsed_emails
     
     st.subheader("📊 Parsed Email Data")
+    filter_settings = st.session_state.get('filter_settings', {})
+    max_limit = filter_settings.get('max_emails_limit', 'unknown')
     st.success(
         f"📊 Parsed {len(df_emails)} emails from "
         f"{st.session_state.uploaded_file_name} "
-        f"(filtered from {filter_settings.get('max_emails_limit', 'unknown')} max)"
+        f"(filtered from {max_limit} max)"
     )
     
     with st.expander("📊 Email Data Details", expanded=False):
@@ -422,9 +439,8 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
                             f"{email_row.get('Subject', 'No Subject')[:50]}..."
                         )
                         
-                        # Extract email text (combine subject and body)
-                        email_text = f"Subject: {email_row.get('Subject', '')}\n\n"
-                        email_text += email_row.get('content', email_row.get('Body', email_row.get('Text', '')))
+                        # Get the full email row for this iteration
+                        email_row = emails_to_process.iloc[i].to_dict()
                         
                         # Get proper email identifier (Message-ID or fallback)
                         message_id = email_row.get('Message-ID')
@@ -433,22 +449,53 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
                             from_addr = email_row.get('From', 'unknown')
                             subject = email_row.get('Subject', 'no-subject')
                             date = email_row.get('Date', '1970-01-01')
-                            message_id = f"{from_addr}_{subject}_{date}".replace(' ', '_')[:100]
+                            base_id = f"{from_addr}_{subject}_{date}"
+                            message_id = base_id.replace(' ', '_')[:100]
                         
-                        # Run extraction for this email
+                        # Run extraction for this email with full metadata
                         try:
                             result = run_extraction_pipeline(
-                                email_text, index, all_chunks, message_id
+                                email_row, index, all_chunks, message_id
                             )
                             outputs.append(result)
                         except Exception as e:
-                            # Handle individual email errors
+                            # Handle individual email errors - provide template for HITL
+                            email_subject = email_row.get('Subject', 'No Subject')
+                            email_content = email_row.get('Body', email_row.get('Content', ''))
+                            
+                            # Create a helpful template for user validation
+                            template_json = {
+                                "Topic": {
+                                    "name": f"Manual Review: {email_subject[:50]}",
+                                    "tasks": [{
+                                        "task": {
+                                            "name": "Please extract task from email content",
+                                            "summary": f"Email content: {email_content[:200]}...",
+                                            "start_date": "",
+                                            "due_date": "",
+                                            "owner": {
+                                                "name": "Unknown",
+                                                "role": "Unknown", 
+                                                "department": "Unknown",
+                                                "organization": "Unknown"
+                                            },
+                                            "collaborators": []
+                                        },
+                                        "email_index": message_id
+                                    }]
+                                }
+                            }
+                            
                             outputs.append({
                                 "email_index": message_id,
-                                "status": "error", 
+                                "status": "error",
                                 "error": str(e),
-                                "extracted_json": {},
-                                "valid": False
+                                "extracted_json": template_json,  # Provide template instead of {}
+                                "correctable_json": json.dumps(template_json, indent=2),
+                                "valid": False,
+                                "needs_user_review": True,  # Trigger HITL
+                                "email_content": email_content[:500],  # Show email content for context
+                                "email_subject": email_subject
                             })
                         
                         # Update progress
@@ -482,8 +529,10 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
         if "graph" in res:
             graphs.append(res["graph"])
         
-        # Check for paused/awaiting review status
-        if res.get("status") in ["paused", "awaiting_user_review"]:
+        # Check for paused/awaiting review status (including errors that need review)
+        if (res.get("status") in ["paused", "awaiting_user_review"] or 
+            res.get("needs_user_review", False) or
+            res.get("needs_human_review", False)):
             paused_results.append((i, res))
         elif "validated_json" in res and res.get("valid", False):
             valid_tasks.append(res["validated_json"])
@@ -523,27 +572,42 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
         for idx, result in paused_results:
             st.markdown(f"**Email {idx + 1}** - Validation needed:")
             
+            # Show email context for better validation
+            if result.get("email_subject"):
+                st.info(f"📧 **Subject:** {result['email_subject']}")
+            if result.get("email_content"):
+                with st.expander("📄 View Email Content", expanded=False):
+                    st.text(result["email_content"])
+            
             col1, col2 = st.columns([1, 1])
             
             with col1:
-                st.markdown("**Original JSON:**")
+                st.markdown("**Current JSON Template:**")
                 original_json = result.get("extracted_json", {})
                 st.json(original_json)
             
             with col2:
-                st.markdown("**Edit JSON (fix any issues):**")
+                st.markdown("**Edit JSON (extract task details):**")
                 json_key = f"json_edit_{idx}"
                 
+                # Use correctable_json if available
+                correctable_template = result.get("correctable_json", 
+                                                 result.get("extracted_json", "{}"))
+                
                 if json_key not in st.session_state:
-                    st.session_state[json_key] = json.dumps(
-                        original_json, indent=2
-                    )
+                    if isinstance(correctable_template, str):
+                        st.session_state[json_key] = correctable_template
+                    else:
+                        st.session_state[json_key] = json.dumps(
+                            correctable_template, indent=2
+                        )
                 
                 corrected_json = st.text_area(
                     "Corrected JSON",
                     value=st.session_state[json_key],
                     height=300,
-                    key=f"correction_{idx}"
+                    key=f"correction_{idx}",
+                    help="Edit the JSON to extract the actual task from the email"
                 )
                 
                 if st.button("✅ Validate & Continue", key=f"validate_{idx}"):
@@ -551,85 +615,69 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
                         # Parse the corrected JSON
                         parsed_correction = json.loads(corrected_json)
                         
-                        # Instead of resuming pipeline, directly update the result
-                        # This simulates what the pipeline would do
-                        updated_result = result.copy()
-                        updated_result.update({
+                        # Update the result with validated JSON
+                        st.session_state.extracted_tasks[idx].update({
                             "validated_json": parsed_correction,
                             "valid": True,
                             "status": "validated",
                             "user_corrected_json": corrected_json
                         })
                         
-                        # Run graph creation if needed
-                        try:
-                            from utils.langgraph_nodes import write_graph_node
-                            graph_result = write_graph_node(updated_result)
-                            if "graph" in graph_result:
-                                updated_result["graph"] = graph_result["graph"]
-                                
-                                # Update the master graph with new HITL validated data
-                                import networkx as nx
-                                import pickle
-                                import os
-                                
-                                try:
-                                    # Load existing master graph or create new one
-                                    if os.path.exists("topic_graph.gpickle"):
-                                        with open("topic_graph.gpickle", "rb") as f:
-                                            master_graph = pickle.load(f)
-                                    else:
-                                        master_graph = nx.DiGraph()
-                                    
-                                    # Add the new graph to master
-                                    master_graph = nx.compose(master_graph, graph_result["graph"])
-                                    
-                                    # Save updated master graph
-                                    with open("topic_graph.gpickle", "wb") as f:
-                                        pickle.dump(master_graph, f)
-                                        
-                                except Exception as e:
-                                    st.warning(f"Failed to update master graph: {e}")
-                                
-                        except Exception as graph_error:
-                            st.warning(f"Graph creation failed: {graph_error}")
+                        # Move to valid tasks immediately
+                        if "valid_extraction_results" not in st.session_state:
+                            st.session_state.valid_extraction_results = []
                         
-                        # Update the session state
-                        st.session_state.extracted_tasks[idx] = updated_result
+                        st.session_state.valid_extraction_results.append(
+                            st.session_state.extracted_tasks[idx]
+                        )
                         
-                        st.success("✅ Validation complete! Task processed.")
+                        st.success("✅ Task validated and moved to 'Extracted Valid Tasks'")
+                        st.info("� Refreshing page to show updated results...")
                         st.rerun()
                         
                     except json.JSONDecodeError as e:
-                        st.error(f"❌ Invalid JSON: {str(e)}")
+                        st.error(f"❌ Invalid JSON format: {str(e)}")
+                        st.info("💡 Tip: Check for missing commas, quotes, or brackets")
                     except Exception as e:
                         st.error(f"❌ Error during validation: {str(e)}")
-                        # Debug info
-                        st.error(f"Debug - result type: {type(result)}")
-                        if isinstance(result, dict):
-                            st.error(f"Debug - result keys: {list(result.keys())}")
-                        else:
-                            st.error("Debug - result is not a dict")
     
     # Display valid tasks with flattened format
-    if valid_tasks:
+    # Combine original valid tasks with newly validated ones
+    all_valid_tasks = valid_tasks.copy()
+    if hasattr(st.session_state, 'valid_extraction_results'):
+        for validated_result in st.session_state.valid_extraction_results:
+            if "validated_json" in validated_result:
+                all_valid_tasks.append(validated_result["validated_json"])
+    
+    if all_valid_tasks:
         st.subheader("✅ Extracted Valid Tasks")
         
         # Use the flattening function
-        flattened_df = flatten_extractions(valid_tasks)
+        flattened_df = flatten_extractions(all_valid_tasks)
         st.dataframe(flattened_df, use_container_width=True)
         
         # Show summary stats
-        st.info(
-            f"📊 Successfully extracted {len(flattened_df)} tasks "
-            f"from {len(outputs)} processed emails"
-        )
+        original_count = len(valid_tasks)
+        validated_count = len(all_valid_tasks) - original_count
+        
+        if validated_count > 0:
+            st.info(
+                f"📊 Total: {len(flattened_df)} tasks "
+                f"({original_count} auto-extracted + {validated_count} human-validated) "
+                f"from {len(outputs)} processed emails"
+            )
+        else:
+            st.info(
+                f"📊 Successfully extracted {len(flattened_df)} tasks "
+                f"from {len(outputs)} processed emails"
+            )
         
         # Store graphs for persistence
         if graphs:
             st.session_state.extracted_graphs = graphs
     else:
-        st.warning("⚠️ No valid tasks were extracted from the processed emails.")
+        warning_msg = "⚠️ No valid tasks were extracted from processed emails."
+        st.warning(warning_msg)
     
     # Display invalid results (if any remain)
     if invalid_results:
@@ -637,46 +685,13 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
             st.write("These emails failed to extract valid tasks:")
             invalid_df = pd.DataFrame(invalid_results)
             st.dataframe(invalid_df, use_container_width=True)
-    
-    # Display task graph
-    if graphs:
-        st.subheader("📊 Task Graph (latest)")
-        
-        try:
-            # Get the latest graph
-            latest_graph = graphs[-1]
-            
-            # Simple graph visualization using NetworkX positions
-            import networkx as nx
-            import matplotlib.pyplot as plt
-            
-            # Create a simple visualization
-            pos = nx.spring_layout(latest_graph)
-            
-            # Create matplotlib figure
-            fig, ax = plt.subplots(figsize=(12, 8))
-            
-            # Draw nodes and edges
-            nx.draw(latest_graph, pos, ax=ax,
-                   with_labels=True, node_color='lightblue',
-                   node_size=1000, font_size=8, font_weight='bold')
-            
-            ax.set_title("Task Relationship Graph")
-            st.pyplot(fig)
-            
-        except Exception as e:
-            st.error(f"Error displaying graph: {str(e)}")
-            
-            # Fallback: show graph info
-            st.write(f"Graph nodes: {len(latest_graph.nodes())}")
-            st.write(f"Graph edges: {len(latest_graph.edges())}")
 
 # Footer
 st.markdown("---")
 st.markdown("""
 ### 📖 How to use:
 1. **Upload** your Inbox.mbox file (extracted from Gmail Takeout)
-2. **Parse** emails (first 200MB processed for performance)  
+2. **Parse** emails (first 200MB processed for performance) 
 3. **Process** with LLM (slower, extracts tasks)
 4. **Validate** any flagged JSON manually
 5. **Navigate** to other pages to view results
@@ -685,7 +700,7 @@ Data persists across page navigation! 🎉
 
 ### 🔧 Features:
 - **Direct .mbox Upload**: No ZIP handling, faster and more reliable
-- **Memory-Safe**: Processes first 200MB to avoid memory issues  
+- **Memory-Safe**: Processes first 200MB to avoid memory issues 
 - **Human-in-the-Loop Validation**: Review and correct extracted JSON
 - **Persistent State**: Data stays available across page navigation
 - **Graph Visualization**: See task relationships and dependencies
