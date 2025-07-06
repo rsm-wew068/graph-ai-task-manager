@@ -16,10 +16,26 @@ from utils.graph_writer import write_tasks_to_graph
 import re
 import json
 
+# Get OpenAI API key with validation
 openai_key = os.getenv("OPENAI_API_KEY")
+if not openai_key:
+    print("❌ WARNING: OPENAI_API_KEY environment variable not found!")
+    print("Available environment variables:")
+    for key in sorted(os.environ.keys()):
+        if 'API' in key.upper() or 'KEY' in key.upper():
+            value_preview = ('***' if key.endswith('_KEY')
+                             else os.environ[key][:20] + '...')
+            print(f"  {key}: {value_preview}")
+else:
+    print(f"✅ OPENAI_API_KEY found: {openai_key[:10]}...")
 
 
 def get_llm():
+    if not openai_key:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is required but not set. "
+            "Please set it in your Hugging Face Space settings."
+        )
     return ChatOpenAI(model="gpt-4", temperature=0.2,
                       openai_api_key=openai_key)
 
