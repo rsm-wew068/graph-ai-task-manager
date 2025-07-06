@@ -77,3 +77,40 @@ def retrieve_similar_chunks(query, index, chunks, k=3):
     # Handle case where index might be smaller than k
     valid_indices = [i for i in indices[0] if i < len(chunks)]
     return [chunks[i] for i in valid_indices]
+
+
+def embed_email_rows(email_df, content_col="content"):
+    """
+    Create embeddings for email DataFrame with all metadata preserved.
+    Returns index, chunks, and row mapping for in-memory use only.
+    
+    Args:
+        email_df: DataFrame with all email columns
+        content_col: Column name containing email content for embedding
+        
+    Returns:
+        tuple: (index, chunks, email_rows) where email_rows maps chunks to rows
+    """
+    # Create a copy to avoid SettingWithCopyWarning
+    df_copy = email_df.copy()
+    
+    # Create chunks but keep track of which email they came from
+    df_copy["chunks"] = df_copy[content_col].apply(lambda x: chunk_text(x))
+    
+    # Create mapping from chunk index to email row
+    email_rows = []
+    all_chunks = []
+    
+    for idx, row in df_copy.iterrows():
+        chunks = row["chunks"]
+        for chunk in chunks:
+            if chunk and chunk.strip():  # Only add non-empty chunks
+                all_chunks.append(chunk)
+                email_rows.append(row.to_dict())
+    
+    # Build index but don't save to disk
+    if all_chunks:
+        index, _ = build_faiss_index(all_chunks)
+        return index, all_chunks, email_rows
+    else:
+        return None, [], []
