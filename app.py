@@ -101,9 +101,56 @@ except ImportError as e:
     st.stop()
 
 # Check environment variables and show warnings if needed
-if not check_environment():
+env_status = check_environment()
+if not env_status:
     st.warning("⚠️ Application may not work correctly without proper API keys")
     st.info("You can still upload and parse emails, but extraction will fail")
+
+# Add comprehensive diagnostic section for deployment debugging
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔧 Deployment Diagnostics")
+
+with st.sidebar.expander("📊 System Status", expanded=False):
+    import platform
+    st.write("**Environment Info:**")
+    st.write(f"- Platform: {platform.system()}")
+    st.write(f"- Python: {platform.python_version()}")
+    st.write(f"- Working Dir: {os.getcwd()}")
+    
+    st.write("**API Status:**")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        st.write(f"✅ API Key: {openai_key[:10]}...")
+        
+        # Test API connection
+        try:
+            from utils.langgraph_nodes import get_llm
+            llm = get_llm()
+            test_result = llm.invoke("Reply with 'API test OK'")
+            st.write(f"✅ API Test: {test_result.content[:20]}...")
+        except Exception as e:
+            st.write(f"❌ API Test Failed: {str(e)[:50]}...")
+    else:
+        st.write("❌ API Key: Not found")
+    
+    st.write("**Memory & Performance:**")
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        st.write(f"- RAM: {memory.percent}% used")
+        st.write(f"- Available: {memory.available // (1024**3)}GB")
+    except ImportError:
+        st.write("- Memory info: Not available")
+
+# Add extraction debugging toggle
+st.sidebar.markdown("---")
+debug_mode = st.sidebar.checkbox("🐛 Enable Debug Mode", value=False)
+if debug_mode:
+    st.sidebar.info("Debug mode will show detailed extraction logs")
+    # Store in session state for use during extraction
+    st.session_state.debug_mode = True
+else:
+    st.session_state.debug_mode = False
 
 
 def flatten_extractions(json_list):
@@ -504,9 +551,24 @@ if st.session_state.parsing_complete and st.session_state.parsed_emails is not N
                         
                         # Run extraction for this email with full metadata
                         try:
+                            print(f"🚀 DEBUG: Starting extraction for email {i+1}")
+                            print(f"📧 DEBUG: Subject: {email_row.get('Subject', 'No Subject')}")
+                            print(f"📧 DEBUG: Message ID: {message_id}")
+                            
                             result = run_extraction_pipeline(
                                 email_row, index, all_chunks, message_id
                             )
+                            
+                            print(f"✅ DEBUG: Extraction completed for email {i+1}")
+                            print(f"📊 DEBUG: Result keys: {list(result.keys())}")
+                            print(f"📊 DEBUG: Status: {result.get('status', 'unknown')}")
+                            print(f"📊 DEBUG: Valid: {result.get('valid', 'not set')}")
+                            print(f"📊 DEBUG: Has validated_json: {'validated_json' in result}")
+                            
+                            # Show debug info in Streamlit if enabled
+                            if st.session_state.get('debug_mode', False):
+                                st.info(f"Email {i+1}: Status={result.get('status')}, Valid={result.get('valid')}")
+                            
                             outputs.append(result)
                         except Exception as e:
                             # Handle individual email errors - provide template for HITL
@@ -568,6 +630,27 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
     outputs = st.session_state.extracted_tasks
     
     st.header("📋 Extraction Results (Persistent)")
+    
+    # Add comprehensive debugging for result categorization
+    st.subheader("🔍 Debug: Result Categorization")
+    
+    with st.expander("📊 Detailed Result Analysis", expanded=False):
+        st.write(f"**Total results:** {len(outputs)}")
+        
+        for i, res in enumerate(outputs):
+            st.write(f"\n**Result {i+1}:**")
+            st.write(f"- Status: `{res.get('status', 'unknown')}`")
+            st.write(f"- Valid: `{res.get('valid', 'not set')}`")
+            st.write(f"- Has validated_json: `{'validated_json' in res}`")
+            st.write(f"- Has graph: `{'graph' in res}`")
+            st.write(f"- Needs user review: `{res.get('needs_user_review', False)}`")
+            st.write(f"- Needs human review: `{res.get('needs_human_review', False)}`")
+            st.write(f"- Error: `{res.get('error', 'none')}`")
+            
+            if 'validated_json' in res:
+                st.write(f"- Validated JSON preview: `{str(res['validated_json'])[:100]}...`")
+            elif 'extracted_json' in res:
+                st.write(f"- Extracted JSON preview: `{str(res['extracted_json'])[:100]}...`")
     
     # Separate valid and invalid results
     valid_tasks = []
