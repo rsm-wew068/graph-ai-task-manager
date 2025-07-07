@@ -86,54 +86,6 @@ if not env_status:
     st.warning("⚠️ Application may not work correctly without proper API keys")
     st.info("You can still upload and parse emails, but extraction will fail")
 
-# Add comprehensive diagnostic section for deployment debugging
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔧 Deployment Diagnostics")
-
-with st.sidebar.expander("📊 System Status", expanded=False):
-    import platform
-    st.write("**Environment Info:**")
-    st.write(f"- Platform: {platform.system()}")
-    st.write(f"- Python: {platform.python_version()}")
-    st.write(f"- Working Dir: {os.getcwd()}")
-    
-    st.write("**API Status:**")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
-        st.write(f"✅ API Key: {openai_key[:10]}...")
-        
-        # Test API connection
-        try:
-            from utils.langgraph_nodes import get_llm
-            llm = get_llm()
-            st.write(f"✅ Model: {llm.model_name}")
-            test_result = llm.invoke("Reply with 'API test OK'")
-            st.write(f"✅ API Test: {test_result.content[:20]}...")
-        except Exception as e:
-            st.write(f"❌ API Test Failed: {str(e)[:50]}...")
-    else:
-        st.write("❌ API Key: Not found")
-    
-    # Show other API-related environment variables
-    api_vars = {k: v for k, v in os.environ.items()
-                if 'API' in k.upper() or 'KEY' in k.upper()}
-    if api_vars and len(api_vars) > 1:  # More than just OPENAI_API_KEY
-        st.write("**Other API Variables:**")
-        for key in sorted(api_vars.keys()):
-            if key != "OPENAI_API_KEY":  # Don't duplicate
-                value = ("***" if key.endswith('_KEY')
-                         else api_vars[key][:20] + "...")
-                st.write(f"- {key}: {value}")
-    
-    st.write("**Memory & Performance:**")
-    try:
-        import psutil
-        memory = psutil.virtual_memory()
-        st.write(f"- RAM: {memory.percent}% used")
-        st.write(f"- Available: {memory.available // (1024**3)}GB")
-    except ImportError:
-        st.write("- Memory info: Not available")
-
 # Add extraction debugging toggle
 st.sidebar.markdown("---")
 debug_mode = st.sidebar.checkbox("🐛 Enable Debug Mode", value=False)

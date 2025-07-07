@@ -164,7 +164,7 @@ class GraphRAG:
         
         return connected
     
-    def query(self, query: str, direct_only: bool = False) -> Dict:
+    def query(self, query: str, direct_only: bool = False, max_nodes: int = 25) -> Dict:
         """Topic-centered query for maximum accuracy."""
         if not self.load_graph_with_embeddings():
             return {
@@ -177,21 +177,21 @@ class GraphRAG:
         topic_matches = self.search_topics_by_name(query, semantic_threshold=0.5)
         
         if topic_matches:
-            # Found topic name matches - use only the BEST match for topic-centered approach
-            best_topic = topic_matches[0]  # Take only the highest scoring topic
-            start_nodes = [best_topic[0]]  # Single topic only
+            # Found topic name matches - use ALL good matches for inclusive approach
+            good_topics = [topic for topic, score in topic_matches if score >= 0.5]
+            start_nodes = good_topics  # Include all related topics
             all_nodes = self.expand_from_nodes(
-                start_nodes, max_nodes=15, direct_only=direct_only
+                start_nodes, max_nodes=max_nodes, direct_only=direct_only
             )
-            confidence = best_topic[1]
+            confidence = topic_matches[0][1]  # Use best match confidence
             
-            explanation = f"Found {len(all_nodes)} nodes from topic '{best_topic[0]}'"
+            explanation = f"Found {len(all_nodes)} nodes from {len(good_topics)} related topic(s)"
             if direct_only:
                 explanation += " (direct neighbors only)"
             
             return {
                 'query': query,
-                'relevant_nodes': [best_topic],  # Only the best topic
+                'relevant_nodes': [(topic, score) for topic, score in topic_matches if score >= 0.5],
                 'all_nodes': list(all_nodes),
                 'confidence_score': round(confidence, 3),
                 'explanation': explanation,
@@ -257,23 +257,23 @@ class GraphRAG:
                 name = attrs.get('name', str(node))
                 color = colors.get(label, '#BDC3C7')
                 
-                # Topic-centered node sizing
+                # Smaller node sizing for better readability
                 if label == 'Topic':
-                    node_size = 50  # Largest - center of graph
+                    node_size = 25  # Reduced from 50
                 elif label == 'Task':
-                    node_size = 35  # Second largest
+                    node_size = 20  # Reduced from 35
                 elif label == 'Person':
-                    node_size = 25  # Medium
+                    node_size = 15  # Reduced from 25
                 else:
-                    node_size = 20  # Smaller for support nodes
+                    node_size = 12  # Reduced from 20
                 
-                # Simple display names - no embedding role in Person labels
+                # Shorter display names for better visibility
                 if label == 'Task':
-                    display_name = name[:40] + "..." if len(name) > 40 else name
+                    display_name = name[:25] + "..." if len(name) > 25 else name
                 elif label == 'Summary':
-                    display_name = name[:50] + "..." if len(name) > 50 else name
-                else:
                     display_name = name[:30] + "..." if len(name) > 30 else name
+                else:
+                    display_name = name[:20] + "..." if len(name) > 20 else name
                 
                 # Create detailed tooltip with all attributes
                 tooltip_parts = [f"<b>{label}</b>: {name}"]
@@ -296,7 +296,7 @@ class GraphRAG:
                     title=tooltip,
                     color=color,
                     size=node_size,
-                    font={'size': 14, 'color': 'black'}
+                    font={'size': 10, 'color': 'black'}  # Reduced from 14
                 )
             
             # Add edges
@@ -315,7 +315,7 @@ class GraphRAG:
             return f"<p>Error generating visualization: {str(e)}</p>"
 
     def search_topics_by_name(self, query: str, semantic_threshold: float = 0.5) -> List[Tuple[str, float]]:
-        """Search for topics using semantic similarity for higher accuracy."""
+        """Search for topics using semantic similarity with flexible matching."""
         if not self.graph or not self.node_embeddings:
             return []
         
@@ -332,8 +332,19 @@ class GraphRAG:
                     # Calculate semantic similarity
                     similarity = cosine_similarity([query_embedding], [topic_embedding])[0][0]
                     
-                    # Only include topics with good semantic similarity
-                    if similarity >= semantic_threshold:
+                    # Also check for substring matches to catch variations
+                    topic_name = attrs.get('name', str(node)).lower()
+                    query_lower = query.lower()
+                    
+                    # Boost similarity for substring matches or close variations
+                    if (query_lower in topic_name or 
+                        any(word in topic_name for word in query_lower.split()) or
+                        similarity >= semantic_threshold):
+                        
+                        # Give higher score to exact or close matches
+                        if query_lower in topic_name:
+                            similarity = max(similarity, 0.9)
+                        
                         topic_matches.append((node, similarity))
         
         return sorted(topic_matches, key=lambda x: x[1], reverse=True)
