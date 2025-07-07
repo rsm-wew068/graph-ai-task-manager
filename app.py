@@ -67,12 +67,7 @@ try:
     )
     from utils.email_parser import parse_uploaded_file_with_filters_safe
     from utils.embedding import embed_dataframe
-    from utils.upload_helpers import (
-        create_chunked_upload_interface,
-        create_local_file_instructions, 
-        create_mbox_splitting_guide,
-        validate_upload_environment
-    )
+
     print("✅ Successfully imported utils modules")
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -266,24 +261,6 @@ uploaded_file = st.file_uploader(
     type=["mbox"],
     help="Extract Gmail Takeout ZIP, then upload Inbox.mbox (any size file accepted)."
 )
-
-# Add alternative upload methods for 403 errors
-if st.checkbox("🔄 Alternative Upload Methods (for 403 errors)"):
-    st.markdown("---")
-    
-    # Show environment check
-    validate_upload_environment()
-    
-    # Chunked upload option
-    create_chunked_upload_interface()
-    
-    # File splitting guide
-    create_mbox_splitting_guide()
-    
-    # Local installation guide
-    create_local_file_instructions()
-
-
 
 if uploaded_file is not None:
     st.session_state.uploaded_file_name = uploaded_file.name

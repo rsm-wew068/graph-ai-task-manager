@@ -15,7 +15,7 @@ license: mit
 # Automated Task Manager 🧠📅  
 A graph-aware reasoning assistant for task understanding, recommendations, and trustable GPT answers — grounded in structured user-uploaded email data.
 
-**✨ Recent Improvements**: Enhanced topic matching, improved node hierarchy formatting, and comprehensive user guidance for optimal query results.
+**✨ Recent Improvements**: Enhanced topic matching, improved node hierarchy formatting, comprehensive user guidance for optimal query results, and streamlined codebase with removal of obsolete fallback upload methods.
 
 ---
 
