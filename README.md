@@ -98,11 +98,6 @@ The pipeline pauses for user review when:
 - No JSON was extracted from the email content
 - Email metadata is inconsistent or incomplete
 
-Users can:
-- ✅ **Edit and apply corrections** to fix invalid JSON
-- ⏭️ **Skip the email** if it's not relevant
-- 🛑 **Stop processing** to review results so far
-
 **Enhanced Entity Extraction & Graph Construction**:
 - **Complete Email Metadata**: GPT receives Message-ID, From, To, Cc, Bcc, names, dates, subject, and content
 - **Organization Detection**: Automatically extracts organizations from email domains (@company.com → "Company")
@@ -117,32 +112,6 @@ Users can:
 - **Topic Variation Handling**: Semantic similarity captures related topic names automatically
 
 This ensures data quality and allows debugging of prompt failures.
-
----
-
-## 🚀 How to Use the App
-
-### Main Page (`app.py`)
-- **Extract Gmail Takeout**: Download from [Google Takeout](https://takeout.google.com/), extract the ZIP file on your computer
-- **Find Inbox.mbox**: Navigate to `Takeout/Mail/Inbox.mbox` in the extracted folder
-- **Upload .mbox file**: Use the file uploader (any size accepted - we process first 200MB automatically) 
-- **Configure filters**: Set email filtering options (date range, keywords, etc.)
-- **Click "Parse Emails"**: Begin extraction and view email preview
-- **Run LLM processing**: Extract structured tasks with AI
-- **Review and correct invalid JSON when prompted** (HITL workflow)
-- **View results**: Browse extracted tasks and graphs after processing completes
-
-### Page 1: 🗓 Calendar View (`pages/My_Calendar.py`)
-- View extracted tasks in a calendar grid by due/start date
-- Filter by owner, department, or topic
-- Time-based visualization of task dependencies and deadlines
-
-### Page 2: 🤖 Ask the Agent (`pages/AI_Chatbot.py`)
-- **Natural Language Queries**: Ask questions about your tasks, people, deadlines
-- **Topic-Centered Search**: Enhanced matching finds all related task variations
-- **Interactive Graph Visualization**: See task relationships and dependencies
-- **Smart Query Tips**: Helpful guidance for optimal results
-- **Persistent Data**: Works across all processed emails and extracted tasks
 
 ---
 
