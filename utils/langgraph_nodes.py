@@ -226,7 +226,7 @@ def validate_json_node(state):
             return {
                 "validated_json": fallback_json,
                 "valid": False,  # Trigger HITL
-                "needs_human_review": True,
+                "needs_user_review": True,
                 "retry_count": retry + 1,
                 **state
             }
@@ -261,7 +261,7 @@ def validate_json_node(state):
             return {
                 "validated_json": fallback_json,
                 "valid": False,  # Changed: Trigger HITL for consistency
-                "needs_human_review": True,  # Flag for HITL workflow
+                "needs_user_review": True,  # Flag for HITL workflow
                 "retry_count": retry + 1,
                 **state
             }
@@ -285,7 +285,7 @@ def validate_json_node(state):
             return {
                 "validated_json": fallback_json,
                 "valid": False,  # Trigger human-in-the-loop
-                "needs_human_review": True,  # Flag for HITL workflow
+                "needs_user_review": True,  # Flag for HITL workflow
                 "retry_count": retry + 1,
                 **state
             }

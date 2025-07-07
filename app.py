@@ -613,7 +613,6 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
             st.write(f"- Has validated_json: `{'validated_json' in res}`")
             st.write(f"- Has graph: `{'graph' in res}`")
             st.write(f"- Needs user review: `{res.get('needs_user_review', False)}`")
-            st.write(f"- Needs human review: `{res.get('needs_human_review', False)}`")
             st.write(f"- Error: `{res.get('error', 'none')}`")
             
             if 'validated_json' in res:
@@ -633,8 +632,7 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
         
         # Check for paused/awaiting review status (including errors that need review)
         if (res.get("status") in ["paused", "awaiting_user_review"] or 
-            res.get("needs_user_review", False) or
-            res.get("needs_human_review", False)):
+            res.get("needs_user_review", False)):
             paused_results.append((i, res))
         elif "validated_json" in res and res.get("valid", False):
             valid_tasks.append(res["validated_json"])
