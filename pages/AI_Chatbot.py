@@ -56,6 +56,22 @@ for message in st.session_state.chat_history:
     st.chat_message("user").write(message["user"])
     st.chat_message("assistant").write(message["assistant"])
 
+# Show example queries to help users
+st.markdown("### 💡 **Tips for Better Results**")
+st.markdown("""
+**📍 Include topic names in your questions for best results!**
+
+**Good examples:**
+- "Send a follow-up email to the person who is responsible for **Capstone Project**"
+- "How many tasks are related to **Customer Analytics**?"
+- "What are the deadlines for **Course Evaluations**?"
+- "Show me tasks about **Work Session**"
+
+**Why topic names matter:** Our system uses topic-centered search for
+maximum accuracy. Including the specific topic name helps find all related
+tasks, people, and deadlines.
+""")
+
 # Get new user input
 if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
     st.chat_message("user").write(user_query)
