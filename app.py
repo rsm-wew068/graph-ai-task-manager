@@ -26,26 +26,6 @@ def check_environment():
         - Or set the environment variable in your shell
         """)
         return False
-    
-    # Show environment status for debugging
-    with st.expander("🔍 Environment Status (Debug Info)"):
-        key_display = (openai_key[:10] + "..." if openai_key
-                       else "❌ Not found")
-        st.write("✅ OPENAI_API_KEY found:", key_display)
-        st.write("🐍 Python version:", sys.version)
-        st.write("📂 Working directory:", os.getcwd())
-        st.write("🌍 Platform:", os.name)
-        
-        # Show other API-related environment variables
-        api_vars = {k: v for k, v in os.environ.items()
-                    if 'API' in k.upper() or 'KEY' in k.upper()}
-        if api_vars:
-            st.write("🔑 Available API environment variables:")
-            for key in sorted(api_vars.keys()):
-                value = ("***" if key.endswith('_KEY')
-                         else api_vars[key][:20] + "...")
-                st.write(f"  - {key}: {value}")
-    
     return True
 
 
@@ -126,12 +106,24 @@ with st.sidebar.expander("📊 System Status", expanded=False):
         try:
             from utils.langgraph_nodes import get_llm
             llm = get_llm()
+            st.write(f"✅ Model: {llm.model_name}")
             test_result = llm.invoke("Reply with 'API test OK'")
             st.write(f"✅ API Test: {test_result.content[:20]}...")
         except Exception as e:
             st.write(f"❌ API Test Failed: {str(e)[:50]}...")
     else:
         st.write("❌ API Key: Not found")
+    
+    # Show other API-related environment variables
+    api_vars = {k: v for k, v in os.environ.items()
+                if 'API' in k.upper() or 'KEY' in k.upper()}
+    if api_vars and len(api_vars) > 1:  # More than just OPENAI_API_KEY
+        st.write("**Other API Variables:**")
+        for key in sorted(api_vars.keys()):
+            if key != "OPENAI_API_KEY":  # Don't duplicate
+                value = ("***" if key.endswith('_KEY')
+                         else api_vars[key][:20] + "...")
+                st.write(f"- {key}: {value}")
     
     st.write("**Memory & Performance:**")
     try:
