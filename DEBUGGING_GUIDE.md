@@ -70,6 +70,9 @@ Added to `app.py`:
 - Different Python version
 - File path issues
 
+### Issue 4: HITL Flags Consolidation ✅
+**Fixed**: The system now uses only `needs_user_review` flag consistently for Human-in-the-Loop validation. Previous confusion between `needs_user_review` and `needs_human_review` has been resolved.
+
 ## ✅ Step-by-Step Debugging Process
 
 ### 1. Immediate Checks (In Deployed App)

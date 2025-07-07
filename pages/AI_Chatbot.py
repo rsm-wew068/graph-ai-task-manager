@@ -80,23 +80,16 @@ if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
                 # Re-run the query to get the structured result for visualization
                 graphrag_result = rag.query_with_semantic_reasoning(user_query)
                 
-                # Generate visualization
-                viz_filename = f"chat_viz_{len(st.session_state.chat_history)}.html"
-                viz_path = rag.visualize_query_results(
-                    user_query, 
-                    graphrag_result, 
-                    f"static/{viz_filename}"
-                )
+                # Generate visualization HTML directly (no file I/O)
+                html_content = rag.generate_visualization_html(user_query, graphrag_result)
                 
                 # Display the visualization in Streamlit
-                if viz_path and os.path.exists(viz_path):
+                if html_content and not html_content.startswith("<p>Error") and not html_content.startswith("<p>No"):
                     st.markdown("### 🔍 Query Analysis Visualization")
                     st.markdown(f"**Query:** {user_query}")
                     st.markdown(f"**Confidence:** {graphrag_result.get('confidence_score', 0):.3f}")
                     
                     # Show the interactive graph
-                    with open(viz_path, 'r', encoding='utf-8') as f:
-                        html_content = f.read()
                     st.components.v1.html(html_content, height=600, scrolling=True)
                     
                     # Show summary stats based on the actual GraphRAG result
@@ -135,7 +128,11 @@ if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
                     with col3:
                         st.metric("📅 Deadlines Found", dates_count)
                 else:
-                    st.error("Could not generate visualization")
+                    st.warning("📊 Visualization temporarily unavailable")
+                    st.info(f"🔧 Debug: html_content length={len(html_content) if html_content else 0}")
+                    # Show text fallback
+                    st.markdown("#### 📝 Query Results (Text)")
+                    st.markdown(observation)
             else:
                 st.warning("Graph not loaded. Please process emails first.")
                 

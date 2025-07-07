@@ -163,21 +163,24 @@ class GraphRAG:
             'method': 'no_match'
         }
     
-    def visualize(self, query: str, result: Dict, output_path: str) -> str:
-        """Simple visualization."""
+    def generate_visualization_html(self, query: str, result: Dict) -> str:
+        """Generate visualization HTML content directly without saving to file."""
         try:
             from pyvis.network import Network
         except ImportError:
-            return "pyvis not installed"
+            return "<p>pyvis not installed</p>"
         
         if not self.graph:
-            return "No graph loaded"
+            return "<p>No graph loaded</p>"
         
         try:
             net = Network(height="600px", width="100%")
             
             # Show only connected nodes
             nodes_to_show = set(result.get('all_nodes', []))
+            if not nodes_to_show:
+                return "<p>No nodes found in query result</p>"
+                
             subgraph = self.graph.subgraph(nodes_to_show)
             
             # Colors for topic-centered hierarchy
@@ -232,14 +235,6 @@ class GraphRAG:
                 
                 tooltip = "<br>".join(tooltip_parts)
                 
-                # Set node size based on type
-                if label == 'Task':
-                    node_size = 35
-                elif label == 'Person':
-                    node_size = 30
-                else:
-                    node_size = 20
-                
                 net.add_node(
                     node,
                     label=display_name,
@@ -254,16 +249,16 @@ class GraphRAG:
                 edge_label = edge_attrs.get('label', '')
                 net.add_edge(u, v, label=edge_label)
             
-            # Save
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            # Set heading and generate HTML
             net.heading = f"Query: {query}"
-            net.save_graph(output_path)
             
-            return output_path
+            # Generate HTML content directly
+            html_content = net.generate_html()
+            return html_content
             
         except Exception as e:
-            return f"Error: {str(e)}"
-    
+            return f"<p>Error generating visualization: {str(e)}</p>"
+
     def search_topics_by_name(self, query: str, semantic_threshold: float = 0.5) -> List[Tuple[str, float]]:
         """Search for topics using semantic similarity for higher accuracy."""
         if not self.graph or not self.node_embeddings:
@@ -291,9 +286,6 @@ class GraphRAG:
     # Compatibility methods
     def query_with_semantic_reasoning(self, query: str) -> Dict:
         return self.query(query)
-    
-    def visualize_query_results(self, query: str, result: Dict, output_path: str) -> str:
-        return self.visualize(query, result, output_path)
 
 
 def format_response(result: Dict) -> str:
