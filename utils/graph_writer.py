@@ -58,33 +58,36 @@ def write_tasks_to_graph(data, save_path=None):
 
                 # Add owner person node
                 owner_name = owner.get("name", "Unknown")
-                G.add_node(owner_name, label="Person", name=owner_name)
+                owner_role = owner.get("role", "Unknown")
+                person_name = f"{owner_name} ({owner_role})"
+                G.add_node(person_name, label="Person", name=person_name)
                 
                 # Add owner role node (following legacy format exactly)
                 owner_role = owner.get("role", "Unknown")
                 owner_dept = owner.get("department", "Unknown")
                 role_name = f"{owner_role} ({owner_dept})"
+                dept_name = f"{owner_dept} ({org})"  # dept (org) format
                 G.add_node(role_name, label="Role", name=role_name)
-                G.add_node(owner_dept, label="Department", name=owner_dept)
+                G.add_node(dept_name, label="Department", name=dept_name)
 
                 # Create owner relationship chain (exactly as in legacy)
-                G.add_edge(task_name, owner_name, label="RESPONSIBLE_TO")
-                G.add_edge(owner_name, role_name, label="HAS_ROLE")
-                G.add_edge(role_name, owner_dept, label="BELONGS_TO")
-                G.add_edge(owner_dept, org, label="IS_IN")
+                G.add_edge(task_name, person_name, label="RESPONSIBLE_TO")
+                G.add_edge(person_name, role_name, label="HAS_ROLE")
+                G.add_edge(role_name, dept_name, label="BELONGS_TO")
+                G.add_edge(dept_name, org, label="IS_IN")
             else:
                 # Fallback for missing or invalid owner - all Unknown
                 org = "Unknown"
                 G.add_node(org, label="Organization", name=org)
-                owner_name = "Unknown"
-                G.add_node(owner_name, label="Person", name=owner_name)
+                person_name = "Unknown (Unknown)"
+                G.add_node(person_name, label="Person", name=person_name)
                 role_name = "Unknown (Unknown)"
                 G.add_node(role_name, label="Role", name=role_name)
-                dept_name = "Unknown"
+                dept_name = "Unknown (Unknown)"  # dept (org) format
                 G.add_node(dept_name, label="Department", name=dept_name)
                 
-                G.add_edge(task_name, owner_name, label="RESPONSIBLE_TO")
-                G.add_edge(owner_name, role_name, label="HAS_ROLE")
+                G.add_edge(task_name, person_name, label="RESPONSIBLE_TO")
+                G.add_edge(person_name, role_name, label="HAS_ROLE")
                 G.add_edge(role_name, dept_name, label="BELONGS_TO")
                 G.add_edge(dept_name, org, label="IS_IN")
 
@@ -95,20 +98,21 @@ def write_tasks_to_graph(data, save_path=None):
                     collab_role = c.get("role", "Unknown")
                     collab_dept = c.get("department", "Unknown")
                     
-                    # Create collaborator role name (following legacy format)
+                    # Create collaborator nodes with consistent formatting
+                    person_name = f"{collab_name} ({collab_role})"
                     role_name = f"{collab_role} ({collab_dept})"
+                    dept_name = f"{collab_dept} ({org})"  # dept (org)
                     
                     # Add collaborator nodes
-                    G.add_node(collab_name, label="Person", name=collab_name)
+                    G.add_node(person_name, label="Person", name=person_name)
                     G.add_node(role_name, label="Role", name=role_name)
-                    G.add_node(collab_dept, label="Department",
-                               name=collab_dept)
+                    G.add_node(dept_name, label="Department", name=dept_name)
                     
                     # Create collaborator relationship chain (as in legacy)
-                    G.add_edge(task_name, collab_name, label="COLLABORATED_BY")
-                    G.add_edge(collab_name, role_name, label="HAS_ROLE")
-                    G.add_edge(role_name, collab_dept, label="BELONGS_TO")
-                    G.add_edge(collab_dept, org, label="IS_IN")
+                    G.add_edge(task_name, person_name, label="COLLABORATED_BY")
+                    G.add_edge(person_name, role_name, label="HAS_ROLE")
+                    G.add_edge(role_name, dept_name, label="BELONGS_TO")
+                    G.add_edge(dept_name, org, label="IS_IN")
 
     # Save graph if path provided
     if save_path:
