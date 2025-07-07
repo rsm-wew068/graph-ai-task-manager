@@ -60,7 +60,7 @@ class GraphRAG:
         return sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]
     
     def expand_from_nodes(self, start_nodes: List[str], max_nodes: int = 10, direct_only: bool = False) -> set:
-        """Expand from starting nodes following all connections."""
+        """Expand from starting nodes following only relevant connections."""
         connected = set(start_nodes)
         
         if direct_only:
@@ -79,7 +79,7 @@ class GraphRAG:
             
             return connected
         
-        # Topic-centered expansion: expand systematically through the hierarchy
+        # Topic-centered expansion: only expand through meaningful relationships
         to_expand = list(start_nodes)
         
         while to_expand and len(connected) < max_nodes:
@@ -87,30 +87,80 @@ class GraphRAG:
             if current_node not in self.graph:
                 continue
                 
-            # Add all direct neighbors
+            current_attrs = self.graph.nodes.get(current_node, {})
+            current_label = current_attrs.get('label', '')
+            
+            # Add directly connected nodes based on meaningful relationships
             for neighbor in self.graph.neighbors(current_node):
                 if len(connected) >= max_nodes:
                     break
                 if neighbor not in connected:
-                    connected.add(neighbor)
-                    
-                    # For systematic expansion, add neighbors to expand list
                     neighbor_attrs = self.graph.nodes.get(neighbor, {})
                     neighbor_label = neighbor_attrs.get('label', '')
                     
-                    # Expand Task nodes to get their full context
-                    if neighbor_label == 'Task':
-                        to_expand.append(neighbor)
-                    # Expand Person nodes to get role hierarchy
-                    elif neighbor_label == 'Person':
-                        to_expand.append(neighbor)
+                    # Get the edge relationship
+                    edge_data = self.graph.get_edge_data(current_node, neighbor, {})
+                    edge_label = edge_data.get('label', '')
+                    
+                    # Only include nodes with strong semantic relationships
+                    should_include = False
+                    
+                    if current_label == 'Topic':
+                        # From Topic: include tasks directly labeled with this topic
+                        if neighbor_label == 'Task' and edge_label == 'HAS_TASK':
+                            should_include = True
+                            
+                    elif current_label == 'Task':
+                        # From Task: include assignees, dates, summaries - NOT other tasks
+                        if neighbor_label in ['Person', 'Date', 'Summary', 'Email Index'] and edge_label in ['RESPONSIBLE_TO', 'COLLABORATED_BY', 'DUE_ON', 'START_ON', 'BASED_ON', 'LINKED_TO']:
+                            should_include = True
+                            
+                    elif current_label == 'Person':
+                        # From Person: include their role/department/organization hierarchy
+                        if neighbor_label in ['Role', 'Department', 'Organization'] and edge_label in ['HAS_ROLE', 'BELONGS_TO', 'IS_IN']:
+                            should_include = True
+                            
+                    elif current_label == 'Role':
+                        # From Role: include department
+                        if neighbor_label == 'Department' and edge_label == 'BELONGS_TO':
+                            should_include = True
+                            
+                    elif current_label == 'Department':
+                        # From Department: include organization
+                        if neighbor_label == 'Organization' and edge_label == 'IS_IN':
+                            should_include = True
+                    
+                    if should_include:
+                        connected.add(neighbor)
+                        
+                        # Queue for expansion to get full hierarchies
+                        if neighbor_label in ['Task', 'Person', 'Role', 'Department']:
+                            to_expand.append(neighbor)
             
-            # Add all predecessors
+            # Also check predecessors for reverse relationships
             for predecessor in self.graph.predecessors(current_node):
                 if len(connected) >= max_nodes:
                     break
                 if predecessor not in connected:
-                    connected.add(predecessor)
+                    pred_attrs = self.graph.nodes.get(predecessor, {})
+                    pred_label = pred_attrs.get('label', '')
+                    
+                    # Get the edge relationship
+                    edge_data = self.graph.get_edge_data(predecessor, current_node, {})
+                    edge_label = edge_data.get('label', '')
+                    
+                    # Include meaningful reverse relationships
+                    should_include = False
+                    
+                    if current_label == 'Task' and pred_label == 'Topic' and edge_label == 'HAS_TASK':
+                        should_include = True
+                    elif current_label in ['Date', 'Summary', 'Email Index'] and pred_label == 'Task':
+                        should_include = True
+                    elif current_label in ['Role', 'Department', 'Organization'] and pred_label == 'Person':
+                        should_include = True
+                    
+                    if should_include:
+                        connected.add(predecessor)
         
         return connected
     
@@ -148,17 +198,22 @@ class GraphRAG:
                 'method': 'topic_name_search'
             }
         
-        # No topic matches found - provide helpful error message
-        available_topics = [
-            "Interview Scheduling", "GenAI Engineer Recruitment", 
-            "Data Science Intern Opportunity", "Praxis Meeting Coordination", 
-            "TRACE Capstone Awards Event"
-        ]
-        topic_list = ", ".join(available_topics)
+        # No topic matches found - show actual topics
+        available_topics = []
+        for node, attrs in self.graph.nodes(data=True):
+            if attrs.get('label') == 'Topic':
+                topic_name = attrs.get('name', str(node))
+                available_topics.append(topic_name)
+        
+        if available_topics:
+            topic_list = ", ".join(available_topics)
+            error_msg = f'No topic found matching "{query}". Available: {topic_list}.'
+        else:
+            error_msg = f'No topic found matching "{query}". No topics in graph.'
         
         return {
             'query': query,
-            'error': f'No topic found matching "{query}". Try one of these topics: {topic_list}.',
+            'error': error_msg,
             'nodes': [],
             'method': 'no_match'
         }
