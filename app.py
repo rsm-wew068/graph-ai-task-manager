@@ -339,11 +339,7 @@ if st.checkbox("🔄 Alternative Upload Methods (for 403 errors)"):
     # Local installation guide
     create_local_file_instructions()
 
-# Add link to troubleshooting guide
-st.sidebar.markdown("---")
-st.sidebar.markdown("🆘 **Having upload issues?**")
-st.sidebar.markdown("📖 [Troubleshooting Guide](./TROUBLESHOOTING.md)")
-st.sidebar.markdown("💡 [Report Issues](https://github.com/your-repo/issues)")
+
 
 if uploaded_file is not None:
     st.session_state.uploaded_file_name = uploaded_file.name
