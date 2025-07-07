@@ -15,7 +15,7 @@ import numpy as np
 class GraphRAG:
     """Dead simple GraphRAG - find stuff, expand from there."""
     
-    def __init__(self, graph_path: str = "topic_graph.gpickle"):
+    def __init__(self, graph_path: str = "/tmp/topic_graph.gpickle"):
         self.graph_path = graph_path
         self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
         self.graph: Optional[nx.DiGraph] = None
@@ -306,7 +306,7 @@ def format_response(result: Dict) -> str:
     
     try:
         import pickle
-        with open("topic_graph.gpickle", "rb") as f:
+        with open("/tmp/topic_graph.gpickle", "rb") as f:
             graph = pickle.load(f)
         
         # Find all tasks in the result

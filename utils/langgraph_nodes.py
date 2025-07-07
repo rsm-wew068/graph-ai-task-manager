@@ -36,7 +36,7 @@ def get_llm():
             "OPENAI_API_KEY environment variable is required but not set. "
             "Please set it in your Hugging Face Space settings."
         )
-    return ChatOpenAI(model="gpt-4", temperature=0.2,
+    return ChatOpenAI(model="gpt-4o", temperature=0.2,
                       openai_api_key=openai_key)
 
 
@@ -345,7 +345,7 @@ def write_graph_node(state):
     
     G = write_tasks_to_graph(
         [transformed_data],
-        save_path="topic_graph.gpickle"
+        save_path="/tmp/topic_graph.gpickle"
     )
     return {"graph": G, **state}
 

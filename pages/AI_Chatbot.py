@@ -107,7 +107,7 @@ if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
                     
                     try:
                         import pickle
-                        with open("topic_graph.gpickle", "rb") as f:
+                        with open("/tmp/topic_graph.gpickle", "rb") as f:
                             graph = pickle.load(f)
                         
                         for node in graphrag_result.get('all_nodes', []):

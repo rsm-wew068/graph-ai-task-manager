@@ -323,25 +323,6 @@ uploaded_file = st.file_uploader(
     help="Extract Gmail Takeout ZIP, then upload Inbox.mbox (any size file accepted)."
 )
 
-# Add troubleshooting section for upload errors
-with st.expander("🚨 Upload Issues? Click here for solutions"):
-    st.markdown("""
-    **If you're getting upload errors (403, timeout, etc.):**
-    
-    1. **File Size**: Try a smaller portion of your .mbox file first
-    2. **Browser**: Switch to Chrome or Firefox (better upload handling)
-    3. **Connection**: Ensure stable internet during upload
-    4. **File Format**: Verify the file ends with `.mbox` (not `.zip`)
-    5. **Antivirus**: Temporarily disable antivirus scanning during upload
-    
-    **Alternative Solutions:**
-    - **Split your mbox**: Use a date range export from Gmail (e.g., last 6 months)
-    - **Local processing**: Download and run this app locally if upload keeps failing
-    - **File validation**: Open your .mbox file in a text editor to ensure it's not corrupted
-    
-    📖 **[View detailed troubleshooting guide](./TROUBLESHOOTING.md)**
-    """)
-
 # Add alternative upload methods for 403 errors
 if st.checkbox("🔄 Alternative Upload Methods (for 403 errors)"):
     st.markdown("---")
@@ -690,7 +671,7 @@ if st.session_state.processing_complete and st.session_state.extracted_tasks:
                 master_graph = nx.compose(master_graph, graph)
         
         # Save the combined graph for chatbot queries
-        with open("topic_graph.gpickle", "wb") as f:
+        with open("/tmp/topic_graph.gpickle", "wb") as f:
             pickle.dump(master_graph, f)
         
         st.info(
