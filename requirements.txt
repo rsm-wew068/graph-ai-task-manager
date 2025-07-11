@@ -16,3 +16,7 @@ email-validator
 python-dateutil
 python-dotenv
 pyvis
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg

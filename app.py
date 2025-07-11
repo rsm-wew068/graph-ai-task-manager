@@ -1,4 +1,3 @@
-import sys
 import os
 import streamlit as st
 import pandas as pd
@@ -41,23 +40,6 @@ st.set_page_config(
     page_icon="📧",
     layout="wide"
 )
-
-# Robust path fix for Hugging Face Spaces and local development
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
-# Also add parent directory for extra safety
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
-# Debug: Print current working directory and Python path
-print(f"Current working directory: {os.getcwd()}")
-print(f"Script directory: {current_dir}")
-print(f"Python path: {sys.path[:3]}")  # First 3 entries
-print(f"Utils directory exists: {os.path.exists(os.path.join(current_dir, 'utils'))}")
-print(f"Utils __init__.py exists: {os.path.exists(os.path.join(current_dir, 'utils', '__init__.py'))}")
 
 # Try importing with error handling
 try:

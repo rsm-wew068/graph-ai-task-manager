@@ -1,16 +1,5 @@
-import sys
-import os
-
-# Robust path fix for Hugging Face Spaces
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
 import streamlit as st
-import pandas as pd
 from streamlit_calendar import calendar
-import datetime
 import json
 
 st.set_page_config(page_title="🗓 Calendar View", layout="wide")

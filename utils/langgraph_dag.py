@@ -8,6 +8,7 @@ from utils.langgraph_nodes import (
     extract_json_node,
     write_graph_node,
 )
+import requests
 
 
 def is_meaningful_task(task_name: str, task_obj: dict) -> bool:
@@ -62,11 +63,18 @@ workflow.set_finish_point("answer")
 graph_app = workflow.compile()
 
 
-def run_agent_chat_round(user_query: str) -> dict:
+def run_agent_chat_round(user_query: str, conversation_id: str = None) -> dict:
     initial_state = {
         "input": user_query,
         "current_date": datetime.now().strftime("%Y-%m-%d")
     }
+    # If conversation_id is provided, fetch history from FastAPI and add to state
+    if conversation_id:
+        API_URL = "http://localhost:8000"  # Change if needed
+        resp = requests.get(f"{API_URL}/chat_turns/{conversation_id}")
+        history = resp.json() if resp.ok else []
+        initial_state["conversation_id"] = conversation_id
+        initial_state["history"] = history
     return graph_app.invoke(initial_state)
 
 

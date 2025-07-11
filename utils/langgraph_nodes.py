@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from langchain_openai import ChatOpenAI
+import requests
 
 # Handle dotenv import gracefully for deployment environments
 try:
@@ -382,3 +383,45 @@ def answer_node(state):
     )
     response = get_llm().invoke(filled)
     return {"final_answer": response.content, **state}
+
+
+# Node: conversational LLM with persistent memory
+def conversational_llm_node(state):
+    """
+    LangGraph node for conversational LLM with persistent memory.
+    Expects 'conversation_id' and 'user_message' in state.
+    """
+    conversation_id = state["conversation_id"]
+    user_message = state["user_message"]
+
+    # 1. Fetch conversation history from FastAPI
+    resp = requests.get(f"http://localhost:8000/chat_turns/{conversation_id}")
+    history = resp.json() if resp.ok else []
+
+    # 2. Build prompt with history
+    prompt = "Conversation so far:\n"
+    for turn in history:
+        prompt += f"User: {turn['user_message']}\n"
+        prompt += f"Assistant: {turn['assistant_message']}\n"
+    prompt += f"User: {user_message}\nAssistant:"
+
+    # 3. Call your LLM (replace with your actual call)
+    llm = get_llm()
+    result = llm.invoke(prompt)
+    assistant_message = result.content.strip()
+
+    # 4. Store the new turn in FastAPI
+    requests.post("http://localhost:8000/chat_turns/", json={
+        "conversation_id": conversation_id,
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+        "state": state  # Optionally store the full state
+    })
+
+    # 5. Return updated state
+    return {
+        "assistant_message": assistant_message,
+        "conversation_id": conversation_id,
+        "history": history + [{"user_message": user_message, "assistant_message": assistant_message}],
+        **state
+    }
