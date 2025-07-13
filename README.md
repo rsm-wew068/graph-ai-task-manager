@@ -1,4 +1,4 @@
-# Automated Task Manager: Neo4j + LangGraph + LangChain
+# [Automated Task Manager](https://huggingface.co/spaces/rsm-wew068/automated-task-manager)
 
 A production-grade, graph-aware AI assistant for task management, recommendations, and trustworthy GPT answers—grounded in structured, user-uploaded email data and powered by a persistent Neo4j knowledge graph.
 
