@@ -1,219 +1,235 @@
-# [Automated Task Manager](https://huggingface.co/spaces/rsm-wew068/automated-task-manager)
-A graph-aware reasoning assistant for task understanding, recommendations, and trustable GPT answers — grounded in structured user-uploaded email data.
+# Automated Task Manager: Neo4j + LangGraph + LangChain
 
-**✨ Recent Improvements**: Enhanced topic matching, improved node hierarchy formatting, comprehensive user guidance for optimal query results, and streamlined codebase with removal of obsolete fallback upload methods.
-
----
-
-## 📦 Project Structure
-
-The project is organized into modular components for graph construction, reasoning, LangGraph workflows, and Streamlit UI delivery:
-
-| File | Purpose |
-|------|---------|
-| `topic_graph.gpickle` | Saved graph object |
-| `utils/email_parser.py` | Parses Gmail Takeout .mbox into structured email DataFrame |
-| `utils/embedding.py` | Chunks, embeds, builds FAISS index |
-| `utils/graph_writer.py` | Converts extracted task JSON to NetworkX graph |
-| `utils/graphrag.py` | GraphRAG query system for topic-centered search |
-| `utils/prompt_template.py` | Prompt templates for GPT-based reasoning and extraction |
-| `utils/langgraph_nodes.py` | LangGraph node definitions for each pipeline step |
-| `utils/langgraph_dag.py` | Defines DAGs: agent chat and email-to-graph extraction |
-| `app.py` | Streamlit entry: upload .mbox, run extraction pipeline |
-| `pages/My_Calendar.py` | Monthly calendar view of extracted tasks |
-| `pages/AI_Chatbot.py` | Chatbot interface for graph-based QA |
-| `requirements.txt` | Python dependency list |
+A production-grade, graph-aware AI assistant for task management, recommendations, and trustworthy GPT answers—grounded in structured, user-uploaded email data and powered by a persistent Neo4j knowledge graph.
 
 ---
 
-## 🧠 End-to-End Reasoning Workflow (AI Chatbot)
+## 🚀 Key Features
 
-1. **User Input** → User submits a natural language question (e.g., "How many tasks are related to Capstone project?")
-2. **Topic-Centered Search** → Enhanced topic matching with:
-   - **Semantic Similarity**: Uses sentence transformers (threshold 0.5)
-   - **Substring Matching**: Catches topic variations (e.g., "Capstone project - Praxis" vs "Capstone project - Praxis (email insights)")
-   - **Flexible Query**: Includes all relevant topic matches for comprehensive results
-3. **Graph Expansion** → Traverses up to 25 related nodes following meaningful relationships:
-   - From **Topics** → **Tasks** via `HAS_TASK`
-   - From **Tasks** → **People**, **Dates**, **Summaries** via `RESPONSIBLE_TO`, `COLLABORATED_BY`, `DUE_ON`, etc.
-   - From **People** → **Roles** → **Departments** → **Organizations** via hierarchical relationships
-4. **Visualization Generation** → Creates interactive HTML graph with hover details
-5. **LangGraph Reasoning** → GPT provides intelligent natural language answers
-6. **UI Display** → Chatbot shows:
-   - **Answer**: Natural language response
-   - **Graph Visualization**: Interactive network of related nodes
-   - **Query Tips**: Guidance for better results
+- **End-to-End Email-to-Graph Pipeline**: Upload Gmail Takeout `.mbox` files, extract actionable tasks, and build a rich knowledge graph in Neo4j.
+- **LangGraph Extraction & Reasoning**: Modular DAGs for robust LLM-based extraction, validation (with HITL), and conversational Q&A.
+- **Neo4j Vector Indexing**: Fast, scalable semantic search and topic matching using native Neo4j vector indexes.
+- **LangChain Agent Integration**: Advanced Cypher generation and answer formatting via LangChain’s Neo4jGraph agent.
+- **Streamlit UI**: Intuitive interfaces for upload, validation, calendar view, and conversational chat with graph visualization.
+- **Human-in-the-Loop (HITL) Validation**: Pause/resume pipeline for user correction of extractions.
 
 ---
 
-## 🧠 Full LangGraph Pipeline (Triggered on .mbox Upload)
+## 🏗️ Architecture Overview
 
-1. **User Uploads Inbox.mbox file** (Gmail Takeout extracted)
-2. **Smart Email Filtering** → Apply intelligent filters:
-   - **Date Range**: Filter by date (default: last 180 days)
-   - **Keywords**: Only parse emails containing specific terms
-   - **Content Length**: Skip very short emails
-   - **Exclude Types**: Skip notifications, newsletters, automated emails
-   - **Safety Limits**: Max 2000 emails, first 200MB processed
-3. **Clean & Normalize** → Parse emails, sanitize content
-4. **Embed & Store in FAISS** → Create vector embeddings for similarity search
-5. **Retrieve Chunks (RAG)** → Find relevant email content for each email
-6. **GPT Extraction → Structured JSON** → Extract tasks with complete metadata
-7. **Validate JSON (Human-in-the-Loop)**  
-   - **If valid**: Continue to step 8
-   - **If invalid**: Pause and show user the raw JSON for correction
-   - **User options**: Edit JSON, skip email, or stop processing
-   - **After correction**: Resume pipeline with validated JSON
-8. **Build NetworkX Graph** → Create structured graph with enhanced node formatting:
-   - **Person nodes**: `"Name (Role)"` (e.g., "Rachel Wang (Student Team Lead)")
-   - **Role nodes**: `"Role (Department)"` (e.g., "Student Team Lead (Praxis Capstone Project)")
-   - **Department nodes**: `"Department (Organization)"` (e.g., "Praxis Capstone Project (University of California, San Diego)")
-   - **Organization nodes**: Just organization name (e.g., "University of California, San Diego")
-9. **Combine Graphs** → Merge individual graphs into master knowledge graph
-10. **GraphRAG QA** → Enable topic-centered queries with semantic search
-11. **UI Display** → Three interfaces:
-    - **Main Page**: Upload, process, validate, view extracted tasks
-    - **Calendar View**: Time-based visualization of tasks
-    - **AI Chatbot**: Natural language Q&A with graph visualization
+```
+Gmail Takeout (.mbox) → Preprocessing/Filtering → LangGraph Extraction Pipeline →
+HITL Validation → Neo4j Graph Construction → Vector Indexing →
+LangChain Agent Q&A → Streamlit UI (Chatbot, Calendar, Visualization)
+```
 
-### 🔍 Human-in-the-Loop (HITL) Validation
-
-The pipeline pauses for user review when:
-- JSON parsing fails (syntax errors)
-- JSON is valid but missing expected fields (name, deliverable, task, or Topic structure)
-- No JSON was extracted from the email content
-- Email metadata is inconsistent or incomplete
-
-**Enhanced Entity Extraction & Graph Construction**:
-- **Complete Email Metadata**: GPT receives Message-ID, From, To, Cc, Bcc, names, dates, subject, and content
-- **Organization Detection**: Automatically extracts organizations from email domains (@company.com → "Company")
-- **Rich People Information**: Captures names, roles, departments from email headers and signatures
-- **Accurate References**: Uses actual Message-ID for email_index ensuring data integrity
-- **Hierarchical Node Formatting**: 
-  - **Person**: `"Name (Role)"` for clear identification
-  - **Role**: `"Role (Department)"` maintaining existing format
-  - **Department**: `"Department (Organization)"` - solves hierarchy conflicts
-  - **Organization**: Clean organization name only
-- **Relationship Preservation**: Maintains `RESPONSIBLE_TO` vs `COLLABORATED_BY` edge distinctions
-- **Topic Variation Handling**: Semantic similarity captures related topic names automatically
-
-This ensures data quality and allows debugging of prompt failures.
+### **Graph Schema**
+```
+(Topic)-[:HAS_TASK]->(Task)-[:RESPONSIBLE_TO]->(Person)-[:HAS_ROLE]->(Role)-[:BELONGS_TO]->(Department)-[:IS_IN]->(Organization)
+                └─[:BASED_ON]->(Summary)
+                └─[:DUE_ON]->(Date)
+                └─[:LINKED_TO]->(Email)
+```
 
 ---
 
-## 🔄 **ETL Pipeline Overview**
+## 🔄 ETL Pipeline Overview
 
-This application implements a comprehensive **ETL (Extract, Transform, Load)** pipeline for email-based task management:
+This application implements a robust **ETL (Extract, Transform, Load)** pipeline for email-based task management:
 
 ### **Extract** 📥
-- **Source**: Gmail Takeout Inbox.mbox files
+- **Source**: Gmail Takeout `.mbox` files
 - **Smart Filtering**: Date range, keywords, content length, email types
 - **Email Parsing**: Structured extraction of metadata (From, To, Subject, Body, Message-ID)
 - **Content Processing**: First 200MB processed for optimal performance
 
 ### **Transform** ⚙️
-- **LLM Processing**: GPT-4 converts unstructured email content into structured JSON
+- **RAG-Enhanced Extraction**: For each email, the system retrieves similar email chunks from your dataset using a local vector index (e.g., FAISS or in-memory embeddings). The LLM prompt is constructed with the main email and up to two related email chunks as additional context. The LLM then extracts structured entities (tasks, people, dates, etc.) from the email, grounded in both the email and its context.
+- **LLM Processing**: LangGraph pipeline uses GPT-4 to convert unstructured email content into structured JSON
 - **Entity Extraction**: Tasks, people, roles, departments, organizations, dates
 - **Data Validation**: Human-in-the-Loop (HITL) validation for data quality
-- **Graph Construction**: Hierarchical node formatting with relationship mapping
-- **Semantic Enrichment**: Vector embeddings for similarity search and topic matching
+- **Graph Construction**: Hierarchical node formatting with relationship mapping (all via Neo4j Cypher)
+- **Semantic Enrichment**: Vector embeddings for similarity search and topic matching (Neo4j vector index)
 
 ### **Load** 📊
-- **NetworkX Graph**: Master knowledge graph with enhanced node hierarchy
-- **Persistent Storage**: Session state management across UI pages
+- **Neo4j Graph Database**: Master knowledge graph with enhanced node hierarchy, persistent and scalable
 - **Multiple Interfaces**: 
   - **Tabular View**: Flattened task data in Main Page
   - **Calendar View**: Time-based visualization
-  - **Graph Database**: Interactive GraphRAG query system
+  - **Graph Database**: Interactive GraphRAG query system (Neo4j backend)
 
 ### **Query & Analytics** 🔍
-- **GraphRAG**: Topic-centered semantic search with graph traversal
-- **Natural Language Interface**: Conversational AI chatbot
-- **Interactive Visualization**: HTML-based graph exploration with hover details
+- **GraphRAG**: Topic-centered semantic search with graph traversal (Neo4j)
+- **Natural Language Interface**: Conversational AI chatbot (LangChain agent)
+- **Interactive Visualization**: Pyvis-based interactive graph visualization with drag-and-drop, zoom, and filtering capabilities
 
-This ETL approach ensures reliable, scalable processing of large email datasets while maintaining data quality through validation workflows.
-
----
-
-## 🏗️ **Technical Architecture**
-
-### **GraphRAG Query System**
-The application uses an advanced GraphRAG (Graph Retrieval-Augmented Generation) system for intelligent task querying:
-
-**Query Processing Pipeline:**
-1. **Semantic Topic Search**: Uses sentence transformers to find related topics (threshold 0.5)
-2. **Graph Traversal**: Expands from topic nodes through meaningful relationships
-3. **Node Filtering**: Follows specific edge types (`HAS_TASK`, `RESPONSIBLE_TO`, `COLLABORATED_BY`, etc.)
-4. **Visualization**: Generates interactive HTML graphs with hover details
-5. **Natural Language**: LangGraph provides conversational answers grounded in graph data
-
-**Graph Schema:**
-```
-Topic → [HAS_TASK] → Task → [RESPONSIBLE_TO] → Person → [HAS_ROLE] → Role → [BELONGS_TO] → Department → [IS_IN] → Organization
-                    ↓
-                [DUE_ON] → Date
-                [BASED_ON] → Summary  
-                [LINKED_TO] → Email Index
-```
-
-**Node Hierarchy Examples:**
-- **Topic**: "Capstone project - Praxis"
-- **Task**: "Sign NDA and share completed forms with the client team"
-- **Person**: "Rachel Wang (Student Team Lead)"
-- **Role**: "Student Team Lead (Praxis Capstone Project)"
-- **Department**: "Praxis Capstone Project (University of California, San Diego)"
-- **Organization**: "University of California, San Diego"
-
-### **Data Flow Architecture**
-```
-Gmail Takeout → .mbox Upload → Smart Filtering → Email Parsing → 
-LLM Extraction → HITL Validation → Graph Construction → 
-Master Graph → GraphRAG Query → Interactive Visualization + NL Answers
-```
+This ETL approach ensures reliable, scalable processing of large email datasets while maintaining data quality through validation workflows and persistent graph storage in Neo4j.
 
 ---
 
-## ✅ **Recently Implemented Improvements**
+## 🧠 End-to-End Pipeline
 
-### **Graph Structure Enhancements**
-- **Hierarchical Node Formatting**: Added `"Department (Organization)"` format to eliminate naming conflicts
-- **Person Node Clarity**: Standardized to `"Name (Role)"` format for both owners and collaborators
-- **Topic Variation Handling**: Enhanced semantic similarity + substring matching (threshold 0.5)
-- **Node Expansion**: Optimized to 25 nodes for comprehensive results without over-expansion
-
-### **User Experience Improvements**
-- **Query Guidance**: Added comprehensive tips in AI Chatbot interface
-- **Example Queries**: Show users how to include topic names for best results
-- **Visual Consistency**: Reduced node and font sizes for better graph readability
-- **Error Prevention**: Clear instructions prevent common query mistakes
-
-### **System Reliability**
-- **Large File Support**: Refactored to accept any size Inbox.mbox files - system processes first 200MB automatically
-- **No ZIP Required**: Direct .mbox upload eliminates decompression errors and 403 issues  
-- **Streamlit Configuration**: Set maxUploadSize=1GB to prevent browser file size rejections
-- **Pandas Warning**: Fixed `SettingWithCopyWarning` in embedding pipeline by using `.copy()` to ensure proper DataFrame handling
-- **HITL Validation**: Fully implemented human-in-the-loop JSON validation with pause/resume functionality  
-- **Session State Management**: Robust handling of processing states in Streamlit UI
+1. **User Uploads .mbox Email File**
+   - Source: Gmail Takeout
+   - Format: `.mbox` file
+2. **Preprocessing / Filtering**
+   - Extracts metadata (Message-ID, Subject, Date, From, To, CC, Body)
+   - Filters out auto-notifications, empty/short replies, out-of-range dates
+3. **LangGraph Extraction Pipeline**
+   - Nodes: chunk embedding, context retrieval, prompt generation, LLM JSON extraction, validation, HITL, write to Neo4j
+   - Pauses for user correction if extraction is invalid
+4. **Neo4j Knowledge Graph Storage**
+   - All entities and relationships stored in Neo4j with rich schema
+   - Embeddings stored as vector properties for semantic search
+5. **Neo4j Vector Indexing**
+   - Fast topic and node similarity search using native vector index
+6. **LangChain Agent Q&A**
+   - Natural language queries answered via LangChain agent with Cypher generation and answer formatting
+   - Supports advanced, multi-hop graph queries
+7. **Streamlit UI**
+   - Main Page: Upload, process, validate, view tasks
+   - Calendar View: Visualize tasks by due date
+   - AI Chatbot: Conversational Q&A with interactive Pyvis graph visualization and query tips
+   - HITL Modal: Edit/approve invalid extractions
 
 ---
 
-## 🔧 Large File Upload Troubleshooting
+## 🧩 Project Structure
 
-### Browser File Size Warnings
-- **Issue**: Browser shows "File too large" or "200MB limit" error
-- **Solution**: **Ignore the warning!** Our system is configured for large files
-- **Why it happens**: Browser default warnings, but our backend handles files up to 1GB
-- **What we process**: Only the first 200MB of your file for optimal performance
+| File | Purpose |
+|------|---------|
+| `utils/email_parser.py` | Parses Gmail Takeout `.mbox` into structured DataFrame |
+| `utils/embedding.py` | Chunks, embeds, builds semantic index |
+| `utils/graph_writer.py` | Converts extracted JSON to Neo4j graph via Cypher |
+| `utils/graphrag.py` | GraphRAG query system, semantic search (Neo4j vector index) |
+| `utils/langchain_neo4j_agent.py` | LangChain Neo4jGraph agent for advanced Q&A |
+| `utils/prompt_template.py` | Prompt templates for LLM extraction and reasoning |
+| `utils/langgraph_nodes.py` | LangGraph node definitions for pipeline steps |
+| `utils/langgraph_dag.py` | Defines LangGraph DAGs: extraction and chat agent |
+| `app.py` | Main Streamlit application (home page) |
+| `start_services.py` | Service orchestrator (starts both FastAPI and Streamlit) |
+| `pages/My_Calendar.py` | Calendar view of tasks |
+| `pages/AI_Chatbot.py` | Chatbot interface for graph-based QA |
+| `requirements.txt` | Python dependencies |
 
-### Configuration Details
-The app automatically handles large files through:
-- **Backend config**: `maxUploadSize = 1GB` in `.streamlit/config.toml`
-- **Smart processing**: Reads only first 200MB regardless of total file size  
-- **Memory efficient**: Uses streaming to avoid loading entire file into memory
-- **No ZIP required**: Direct .mbox upload eliminates decompression errors
+---
 
-### If Upload Still Fails
-1. **Check file format**: Must be `.mbox` file (not ZIP)
-2. **Try smaller chunks**: Extract date-filtered exports from Gmail
-3. **Browser issues**: Try different browser (Chrome/Firefox work best)
-4. **Network timeout**: Ensure stable internet connection during upload
+## 🔍 Human-in-the-Loop (HITL) Validation
+
+- Pipeline pauses for user review if:
+  - JSON parsing fails
+  - JSON is missing required fields
+  - No JSON extracted from email
+  - Email metadata is inconsistent/incomplete
+- User can edit/correct extraction and resume pipeline
+
+---
+
+## 🧠 Conversational Q&A (LangChain Agent)
+
+- User enters a natural language query (e.g., “What tasks are due next week?”)
+- LangChain agent:
+  1. Performs semantic search (Neo4j vector index)
+  2. Generates Cypher queries for Neo4j
+  3. Formats answers using LLM
+  4. Streams results to UI
+- Supports multi-hop, context-rich queries and answer formatting
+
+---
+
+## 🕸️ Neo4j Vector Indexing
+
+- Node embeddings stored as `vector` property on each node
+- Vector index created for fast similarity search
+- Semantic search and topic matching performed natively in Neo4j
+
+---
+
+## 🖼️ Streamlit UI
+
+- **Main Page**: Upload, process, validate, view tasks
+- **Calendar View**: Visualize tasks by due date
+- **AI Chatbot**: Conversational Q&A, graph visualization, query tips
+- **HITL Modal**: Edit/approve invalid extractions
+
+---
+
+## ⚙️ Configuration & Deployment
+
+- **Neo4j Connection**: Store credentials in `.env` (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`)
+- **OpenAI API Key**: Required for LLM processing (`OPENAI_API_KEY`)
+- **Docker Support**: Use `host.docker.internal` for cross-container access
+- **CI/CD**: GitHub Actions for build, test, and deployment (see `.github/workflows/ci.yml`)
+- **Secrets**: Store sensitive values as GitHub Actions secrets
+
+### **Quick Start (GitHub)**
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/yourusername/graph-ai-task-manager.git
+   cd graph-ai-task-manager
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   uv sync
+   ```
+
+3. **Set environment variables**: Create `.env` file with Neo4j and OpenAI credentials
+
+4. **Start with Docker Compose** (recommended):
+   ```bash
+   docker-compose up -d
+   ```
+
+5. **Or start manually**:
+   ```bash
+   python start_services.py
+   ```
+
+6. **Access the application**:
+   - Streamlit UI: http://localhost:8501
+   - FastAPI Backend: http://localhost:8000
+   - Neo4j Browser: http://localhost:7474
+
+### **Docker Deployment**
+
+```bash
+docker build -t task-manager .
+docker run -p 8501:8501 -p 8000:8000 task-manager
+```
+
+---
+
+## 📝 Example Usage: LangChain Neo4j Agent
+
+```python
+from utils.langchain_neo4j_agent import answer_with_neo4j_agent
+
+query = "Who is responsible for Capstone Project tasks due next week?"
+answer = answer_with_neo4j_agent(query)
+print(answer)
+```
+
+---
+
+## 🧠 What This Enables
+
+| Feature                        | Enabled by                |
+|--------------------------------|---------------------------|
+| Structured email → graph       | LangGraph                 |
+| Persistent knowledge graph     | Neo4j                     |
+| Smart queries                  | LangChain + Cypher        |
+| Conversational QA              | LangChain agent           |
+| Visual calendar                | Streamlit                 |
+| Editable extraction            | HITL validation (LangGraph)|
+
+---
+
+## 📚 References
+- [Neo4j Vector Indexes](https://neo4j.com/docs/cypher-manual/current/indexes-for-vector-search/)
+- [LangChain Neo4jGraph](https://python.langchain.com/docs/integrations/graph/neo4j)
+- [LangGraph](https://langchain-ai.github.io/langgraph/)
+- [Streamlit](https://streamlit.io/)
+
+---

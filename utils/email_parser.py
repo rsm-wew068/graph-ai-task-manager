@@ -322,14 +322,11 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
             )
         
         # Info message about file size handling
-        if file_size_mb > 200:
-            print(f"📂 File size: {file_size_mb:.1f}MB - processing first 200MB for performance")
-        else:
-            print(f"📂 File size: {file_size_mb:.1f}MB - processing entire file")
+        print(f"📂 File size: {file_size_mb:.1f}MB - processing entire file")
         
-        # Save uploaded file temporarily, but only write first 200MB
+        # Save uploaded file temporarily
         import tempfile
-        max_bytes_to_write = min(len(file_content), 200 * 1024 * 1024)  # 200MB limit
+        max_bytes_to_write = len(file_content)  # No size limit
         
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mbox') as tmp_file:
             # Write only the first 200MB of the file
@@ -337,11 +334,11 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
             tmp_file.flush()
             
             try:
-                # Parse the limited mbox file
-                max_emails = filter_settings.get("max_emails_limit", 2000)
+                # Parse the mbox file
+                max_emails = filter_settings.get("max_emails_limit", 10000)
                 emails_df = parse_inbox_mbox(
                     tmp_file.name, 
-                    max_bytes=200 * 1024 * 1024,  # This will process the whole temp file now
+                    max_bytes=len(file_content),  # Process entire file
                     max_emails=max_emails
                 )
                 
@@ -350,7 +347,7 @@ def parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings=None):
                     emails_df['content'] = emails_df['content'].apply(clean_email_body)
                     
                     # Convert dates to proper datetime format first
-                    emails_df['Date'] = pd.to_datetime(emails_df['Date'], errors='coerce')
+                    emails_df['Date'] = pd.to_datetime(emails_df['Date'], errors='coerce', utc=True)
                     
                     # Apply filters (which need datetime objects)
                     emails_df = apply_email_filters(emails_df, filter_settings)

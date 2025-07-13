@@ -13,7 +13,7 @@ except ImportError:
 
 from utils.prompt_template import rag_extraction_prompt, reason_prompt
 from utils.embedding import retrieve_similar_chunks
-from utils.graph_writer import write_tasks_to_graph
+from utils.graph_writer import write_tasks_to_neo4j
 import re
 import json
 
@@ -35,7 +35,7 @@ def get_llm():
     if not openai_key:
         raise ValueError(
             "OPENAI_API_KEY environment variable is required but not set. "
-            "Please set it in your Hugging Face Space settings."
+            "Please set it in your environment variables or .env file."
         )
     return ChatOpenAI(model="gpt-4o", temperature=0.2,
                       openai_api_key=openai_key)
@@ -344,11 +344,14 @@ def write_graph_node(state):
         # JSON already has the correct nested structure
         transformed_data = extracted
     
-    G = write_tasks_to_graph(
-        [transformed_data],
-        save_path="/tmp/topic_graph.gpickle"
-    )
-    return {"graph": G, **state}
+    try:
+        # Write to Neo4j instead of NetworkX
+        write_tasks_to_neo4j([transformed_data])
+        print(f"✅ Successfully wrote task to Neo4j: {transformed_data.get('Topic', {}).get('name', 'Unknown')}")
+        return {"neo4j_status": "success", "graph": None, **state}
+    except Exception as e:
+        print(f"❌ Failed to write to Neo4j: {e}")
+        return {"neo4j_status": "error", "error": str(e), "graph": None, **state}
 
 
 # Node: query graph
