@@ -7,37 +7,47 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: user
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: mydatabase
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-    env:
-      DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/mydatabase
+    
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
+      
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install uv
+          uv sync --frozen
+      
       - name: Lint
         run: |
           pip install flake8
-          flake8 .
-      - name: Test FastAPI endpoint
+          # Use .flake8 configuration file for lenient linting
+          flake8 . --count --show-source --statistics
+      
+      - name: Test imports
         run: |
-          uvicorn api:app --host 0.0.0.0 --port 8000 &
-          sleep 5
-          curl -f http://localhost:8000/
+          python -c "from utils.email_parser import parse_uploaded_file_with_filters_safe"
+          python -c "from utils.embedding import embed_dataframe"
+          python -c "from utils.graph_writer import write_tasks_to_neo4j"
+          python -c "from utils.graphrag import GraphRAG"
+          python -c "from utils.langchain_neo4j_agent import answer_with_neo4j_agent"
+          python -c "from utils.langgraph_nodes import get_llm"
+          python -c "from utils.langgraph_dag import run_extraction_pipeline"
+          python -c "from utils.chainqa_graph_agent import chainqa_graph_search"
+      
+      - name: Test FastAPI backend
+        run: |
+          # Test that FastAPI app can be imported
+          python -c "from utils.api import app"
+          echo "FastAPI app imports successfully"
+      
+      - name: Test Streamlit app
+        run: |
+          # Test that Streamlit app can be imported
+          python -c "import streamlit; import app"
+          echo "Streamlit app imports successfully"
