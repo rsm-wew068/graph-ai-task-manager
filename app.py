@@ -440,8 +440,7 @@ def main():
                 end_date = None
             
             st.markdown("**📧 Email Limits**")
-            max_emails = st.number_input("Maximum emails to process", min_value=100, max_value=50000, value=10000)
-        
+            max_emails = st.number_input("Maximum emails to process", min_value=1, max_value=50000, value=100)
         with col2:
             st.markdown("**⚙️ Content Filters**")
             
