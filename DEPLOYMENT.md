@@ -19,7 +19,7 @@ cp .env.example .env
 # Edit .env with your credentials
 
 # Start the application
-python start_app.py
+streamlit run app.py
 ```
 
 ## Docker Deployment

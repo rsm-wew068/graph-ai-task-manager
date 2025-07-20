@@ -11,6 +11,10 @@ import json
 from pathlib import Path
 import tempfile
 import zipfile
+from datetime import date, datetime
+from utils.langgraph_nodes import convert_dates_to_strings
+
+print("=== APP.PY STARTED ===")
 
 # Page configuration
 st.set_page_config(
@@ -65,47 +69,29 @@ def flatten_extractions(json_list):
         if "validated_json" in item:
             item = item["validated_json"]
             
-        topic = item.get("Topic", {})
-        topic_name = (topic.get("name", "Unknown Topic")
-                      if isinstance(topic, dict) else "Unknown Topic")
-        
-        tasks = topic.get("tasks", []) if isinstance(topic, dict) else []
-        for task_obj in tasks:
-            if not isinstance(task_obj, dict):
-                continue
-                
-            task = task_obj.get("task", {})
-            if not isinstance(task, dict):
-                continue
-                
-            # Extract comprehensive owner information
-            owner = task.get("owner", {})
-            if isinstance(owner, dict):
-                owner_name = owner.get("name", "Unknown")
-                owner_role = owner.get("role", "")
-                owner_dept = owner.get("department", "")
-                owner_org = owner.get("organization", "")
-            else:
-                owner_name = str(owner) if owner else "Unknown"
-                owner_role = owner_dept = owner_org = ""
-            
-            # Extract all task details for comprehensive display
-            rows.append({
-                "Topic": topic_name,
-                "Task Name": task.get("name", "Unnamed Task"),
-                "Summary": task.get("summary", ""),
-                "Start Date": task.get("start_date", ""),
-                "Due Date": task.get("due_date", ""),
-                "Owner Name": owner_name,
-                "Owner Role": owner_role,
-                "Owner Department": owner_dept,
-                "Owner Organization": owner_org,
-                "Email Index": task_obj.get("email_index", "")
-            })
+        # Flat structure only - matches Notion schema exactly
+        rows.append({
+            "Task Name": item.get("Name", "Unnamed Task"),
+            "Task Description": item.get("Task Description", ""),
+            "Due Date": item.get("Due Date", ""),
+            "Received Date": item.get("Received Date", ""),
+            "Status": item.get("Status", ""),
+            "Topic": item.get("Topic", ""),
+            "Priority Level": item.get("Priority Level", ""),
+            "Sender": item.get("Sender", ""),
+            "Assigned To": item.get("Assigned To", ""),
+            "Email Source": item.get("Email Source", ""),
+            "Spam": item.get("Spam", False)
+        })
     return pd.DataFrame(rows)
 
+def default_serializer(obj):
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    return str(obj)
+
 def main():
-    """Main Streamlit application."""
+    print("=== main() called ===")
     import pandas as pd
     
     # Configure Streamlit for better persistence
@@ -118,6 +104,7 @@ def main():
     
     # Check environment
     env_status = check_environment()
+    print(f"Environment status: {env_status}")
     if not env_status:
         st.warning("⚠️ Application may not work correctly without proper API keys")
         st.info("You can still upload and parse emails, but extraction will fail")
@@ -181,40 +168,35 @@ def main():
     # Sidebar for system status
     with st.sidebar:
         st.markdown("### 📊 System Status")
-        
         # Check if Neo4j is connected
         try:
-            from utils.api import driver
+            from neo4j import GraphDatabase
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            NEO4J_URI = os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
+            NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+            NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+            driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
             with driver.session() as session:
                 result = session.run("MATCH (n) RETURN count(n) as count")
                 node_count = result.single()["count"]
                 st.metric("Total Nodes", node_count)
                 st.success("✅ Neo4j Connected")
+            driver.close()
         except Exception as e:
             st.metric("Total Nodes", "Not Connected")
             st.error("⚠️ Neo4j connection failed")
-        
-        # Check FastAPI backend
-        try:
-            import requests
-            response = requests.get("http://localhost:8000/", timeout=2)
-            if response.status_code == 200:
-                st.success("✅ FastAPI Backend Connected")
-            else:
-                st.warning("⚠️ FastAPI Backend Issues")
-        except:
-            st.error("❌ FastAPI Backend Not Available")
-        
+
         st.markdown("### 🔧 System Info")
         st.info("""
         - **Frontend**: Streamlit ✅
-        - **Backend**: FastAPI (Chat History)
         - **Database**: Neo4j Graph Database
         - **AI Engine**: LangChain + LangGraph
         - **Storage**: Persistent Neo4j
         - **Deployment**: Production Ready
         """)
-        
+
         # Show processing status
         if hasattr(st.session_state, 'processing_complete') and st.session_state.processing_complete:
             outputs = st.session_state.get("extracted_tasks", [])
@@ -227,7 +209,7 @@ def main():
             st.warning("📁 Emails parsed, ready for processing")
         else:
             st.info("📝 No data loaded yet")
-        
+
         # Clear data button
         if st.button("🗑️ Clear Cached Data"):
             for key in ["parsed_emails", "extracted_tasks", "parsing_complete", 
@@ -238,23 +220,40 @@ def main():
             st.success("✅ Cached data cleared!")
             st.rerun()
 
-        # Clear database button
-        if st.button("🗑️ Clear Database"):
-            try:
-                from neo4j import GraphDatabase
-                import os
-                from dotenv import load_dotenv
-                load_dotenv()
-                NEO4J_URI = os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
-                NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-                NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-                driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-                with driver.session() as session:
-                    session.run("MATCH (n) DETACH DELETE n")
-                driver.close()
-                st.success("✅ Neo4j database cleared!")
-            except Exception as e:
-                st.error(f"❌ Failed to clear Neo4j database: {e}")
+        # Clear database buttons
+        st.subheader("🗑️ Database Management")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🗄️ Clear Neo4j Database"):
+                try:
+                    from neo4j import GraphDatabase
+                    import os
+                    from dotenv import load_dotenv
+                    load_dotenv()
+                    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
+                    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+                    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+                    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+                    with driver.session() as session:
+                        session.run("MATCH (n) DETACH DELETE n")
+                    driver.close()
+                    st.success("✅ Neo4j database cleared!")
+                except Exception as e:
+                    st.error(f"❌ Failed to clear Neo4j database: {e}")
+        
+        with col2:
+            if st.button("📝 Clear Notion Database"):
+                try:
+                    from utils.notion_utils import clear_notion_database
+                    success = clear_notion_database()
+                    if success:
+                        st.success("✅ Notion database cleared!")
+                    else:
+                        st.error("❌ Failed to clear Notion database")
+                except Exception as e:
+                    st.error(f"❌ Failed to clear Notion database: {e}")
     
     # Main content tabs
     tab1, tab2, tab3, tab4 = st.tabs(["🏠 Home", "📧 Upload & Process", "📋 Task Management", "🔍 Results Analysis"])
@@ -291,8 +290,8 @@ def main():
                     "description": "Chat with your task manager using natural language queries and commands"
                 },
                 {
-                    "title": "📅 Calendar Integration",
-                    "description": "Visualize and manage tasks in an interactive calendar interface"
+                    "title": "📅 Notion Integration",
+                    "description": "Visualize and manage tasks in Notion and sync with your workspace"
                 },
                 {
                     "title": "👥 Human-in-the-Loop",
@@ -324,7 +323,7 @@ def main():
             
             Or use the sidebar pages:
             - **🤖 AI Chatbot** - Conversational interface
-            - **📅 My Calendar** - Visual calendar view
+            - **📅 My Calendar** - Visual task calendar view
             """)
     
     with tab2:
@@ -439,8 +438,6 @@ def main():
                 start_date = None
                 end_date = None
             
-            st.markdown("**📧 Email Limits**")
-            max_emails = st.number_input("Maximum emails to process", min_value=1, max_value=50000, value=100)
         with col2:
             st.markdown("**⚙️ Content Filters**")
             
@@ -474,7 +471,6 @@ def main():
                     "end_date": end_date,
                     "keywords": keywords.split(',') if keywords else [],
                     "min_content_length": min_content_length,
-                    "max_emails_limit": max_emails,
                     "exclude_types": exclude_types
                 }
                 st.session_state.filter_settings = filter_settings
@@ -496,13 +492,16 @@ def main():
             
             with col1:
                 if st.button("🔍 Parse Emails", type="primary"):
+                    print("Parse Emails button clicked")
                     try:
                         # Import email parser
                         from utils.email_parser import parse_uploaded_file_with_filters_safe
                         
                         # Parse emails
                         with st.spinner("📧 Parsing emails..."):
+                            print("Parsing emails...")
                             emails_df = parse_uploaded_file_with_filters_safe(uploaded_file, filter_settings)
+                            print(f"Parsed {len(emails_df)} emails")
                             
                             if not emails_df.empty:
                                 st.session_state.parsed_emails = emails_df
@@ -519,110 +518,140 @@ def main():
                                 st.warning("⚠️ No emails found matching your filters")
                                 
                     except Exception as e:
+                        print(f"Exception during parsing: {e}")
+                        import traceback
+                        traceback.print_exc()
                         st.error(f"❌ Error parsing emails: {str(e)}")
             
             with col2:
                 if hasattr(st.session_state, 'parsing_complete') and st.session_state.parsing_complete:
                     if st.button("🤖 Extract Tasks with AI", type="primary"):
+                        print("=== EXTRACTION PROCESS STARTED ===")
+                        print("Extract Tasks with AI button clicked")
                         try:
                             # Import processing modules
+                            print("Importing modules...")
                             from utils.langgraph_dag import run_extraction_pipeline
                             from utils.embedding import embed_dataframe
+                            print("Modules imported successfully")
                             
                             parsed_emails = st.session_state.parsed_emails
+                            print(f"Parsed emails type: {type(parsed_emails)}")
+                            print(f"Parsed emails length: {len(parsed_emails) if hasattr(parsed_emails, '__len__') else 'No length'}")
+                            
                             if not isinstance(parsed_emails, pd.DataFrame):
+                                print("No parsed emails found. Extraction aborted.")
                                 st.error("❌ No parsed emails found. Please parse emails before extracting tasks.")
                                 return
+                            
                             emails_to_process = parsed_emails
+                            print(f"Emails to process: {len(emails_to_process)}")
                             
                             with st.spinner("🧠 Extracting tasks with AI..."):
-                                # Create embeddings for similarity search
-                                with st.status("Creating embeddings..."):
+                                print("Creating embeddings...")
+                                try:
                                     index, all_chunks = embed_dataframe(emails_to_process)
+                                    print(f"Embeddings created successfully. Index: {type(index)}, Chunks: {len(all_chunks)}")
+                                except Exception as e:
+                                    print(f"Error creating embeddings: {e}")
+                                    st.error(f"❌ Error creating embeddings: {str(e)}")
+                                    return
                                 
-                                # Run extraction pipeline for each email
+                                print("Embeddings created.")
                                 outputs = []
                                 progress_bar = st.progress(0)
                                 
                                 with st.status("Running LLM extraction...") as status:
                                     for i, (_, email_row) in enumerate(emails_to_process.iterrows()):
+                                        print(f"Processing email {i+1}/{len(emails_to_process)}: {email_row.get('Subject', 'No Subject')}")
                                         status.update(
                                             label=f"Processing email {i+1}/{len(emails_to_process)}: "
                                             f"{email_row.get('Subject', 'No Subject')[:50]}..."
                                         )
-                                        
                                         # Get the full email row for this iteration
                                         email_row = emails_to_process.iloc[i].to_dict()
+                                        print(f"Email row keys: {list(email_row.keys())}")
                                         
                                         # Get proper email identifier (Message-ID or fallback)
                                         message_id = email_row.get('Message-ID')
                                         if not message_id:
-                                            # Fallback to unique identifier if Message-ID missing
                                             from_addr = email_row.get('From', 'unknown')
                                             subject = email_row.get('Subject', 'no-subject')
                                             date = email_row.get('Date', '1970-01-01')
                                             base_id = f"{from_addr}_{subject}_{date}"
                                             message_id = base_id.replace(' ', '_')[:100]
+                                        print(f"Message ID: {message_id}")
                                         
                                         # Run extraction for this email with full metadata
                                         try:
+                                            print(f"Calling run_extraction_pipeline for email {i+1}...")
                                             result = run_extraction_pipeline(
                                                 email_row, index, all_chunks, message_id
                                             )
+                                            print(f"Extraction result for email {i+1}: {result.get('status', 'No status')}")
+                                            print(f"Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
                                             
+                                            # Write debug output to file
+                                            with open("debug_output.txt", "a") as f:
+                                                f.write(f"Email {i+1}: {email_row.get('Subject', 'No Subject')}\n")
+                                                f.write(f"Extraction result: {json.dumps(result, default=default_serializer, indent=2)}\n\n")
+                                            
+                                            # Debug print before appending
+                                            print("Result to append to outputs:", result)
                                             outputs.append(result)
+                                            # Debug print after appending
+                                            print("Current outputs list length:", len(outputs))
+                                            
                                         except Exception as e:
+                                            print(f"Error processing email {i+1}: {e}")
+                                            import traceback
+                                            traceback.print_exc()
+                                            
                                             # Handle individual email errors - provide template for HITL
                                             email_subject = email_row.get('Subject', 'No Subject')
                                             email_content = email_row.get('Body', email_row.get('Content', ''))
-                                            
                                             # Create a helpful template for user validation
                                             template_json = {
-                                                "Topic": {
-                                                    "name": f"Manual Review: {email_subject[:50]}",
-                                                    "tasks": [{
-                                                        "task": {
-                                                            "name": "Please extract task from email content",
-                                                            "summary": f"Email content: {email_content[:200]}...",
-                                                            "start_date": "",
-                                                            "due_date": "",
-                                                            "owner": {
-                                                                "name": "Unknown",
-                                                                "role": "Unknown", 
-                                                                "department": "Unknown",
-                                                                "organization": "Unknown"
-                                                            },
-                                                            "collaborators": []
-                                                        },
-                                                        "email_index": message_id
-                                                    }]
-                                                }
+                                                "Name": f"Manual Review: {email_subject[:50]}",
+                                                "Task Description": f"Email content: {email_content[:200]}...",
+                                                "Due Date": "",
+                                                "Received Date": email_row.get("Date", ""),
+                                                "Status": "",
+                                                "Topic": "",
+                                                "Priority Level": "",
+                                                "Sender": email_row.get("From", ""),
+                                                "Assigned To": "",
+                                                "Email Source": message_id,
+                                                "Spam": False
                                             }
-                                            
                                             outputs.append({
-                                                "email_index": message_id,
+                                                "Email Source": message_id,
                                                 "status": "error",
                                                 "error": str(e),
                                                 "extracted_json": template_json,
-                                                "correctable_json": json.dumps(template_json, indent=2),
+                                                "correctable_json": json.dumps(convert_dates_to_strings(template_json), indent=2),
                                                 "valid": False,
                                                 "needs_user_review": True,
                                                 "email_content": email_content[:500],
                                                 "email_subject": email_subject
                                             })
-                                        
                                         # Update progress
                                         progress_bar.progress((i + 1) / len(emails_to_process))
                                 
                                 # Store results in session state
+                                print("All outputs before storing in session state:", outputs)
                                 st.session_state.extracted_tasks = outputs
+                                print("Session state extracted_tasks after storing:", st.session_state.extracted_tasks)
                                 st.session_state.processing_complete = True
-                                
                                 # Count valid tasks
                                 valid_tasks = [r for r in outputs if r.get("valid", False)]
+                                print(f"Extraction complete. {len(valid_tasks)} valid tasks extracted.")
                                 st.success(f"✅ Extracted {len(valid_tasks)} valid tasks!")
                                 
                         except Exception as e:
+                            print(f"Exception during extraction: {e}")
+                            import traceback
+                            traceback.print_exc()
                             st.error(f"❌ Error extracting tasks: {str(e)}")
                 else:
                     st.info("📝 Parse emails first to enable AI extraction")
@@ -651,7 +680,7 @@ def main():
                     invalid_results.append({
                         "email_index": i + 1,
                         "raw_json": res.get("extracted_json", "No JSON extracted"),
-                        "email_id": res.get("email_index", "Unknown"),
+                        "email_id": res.get("Email Source", "Unknown"),
                         "status": res.get("status", "unknown")
                     })
             
@@ -734,6 +763,7 @@ def main():
             # Display valid tasks with flattened format
             # Combine original valid tasks with newly validated ones
             all_valid_tasks = valid_tasks.copy()
+            print("Valid tasks for display:", valid_tasks)
             if hasattr(st.session_state, 'valid_extraction_results'):
                 for validated_result in st.session_state.valid_extraction_results:
                     if "validated_json" in validated_result:
@@ -742,9 +772,45 @@ def main():
             if all_valid_tasks:
                 st.subheader("✅ Extracted Valid Tasks")
                 
-                # Use the flattening function
+                # Add editing interface for valid tasks
+                st.markdown("### ✏️ Edit Tasks")
+                st.info("You can edit any task below. Changes will be saved when you click 'Save Changes'.")
+                
+                # Create editable dataframe
                 flattened_df = flatten_extractions(all_valid_tasks)
-                st.dataframe(flattened_df, use_container_width=True)
+                
+                # Add edit functionality
+                edited_df = st.data_editor(
+                    flattened_df,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    key="task_editor"
+                )
+                
+                # Save changes button
+                if st.button("💾 Save Changes", type="primary"):
+                    # Convert edited dataframe back to task format
+                    updated_tasks = []
+                    for _, row in edited_df.iterrows():
+                        task = {
+                            "Name": row.get("Name", ""),
+                            "Task Description": row.get("Task Description", ""),
+                            "Due Date": row.get("Due Date", ""),
+                            "Received Date": row.get("Received Date", ""),
+                            "Status": row.get("Status", ""),
+                            "Topic": row.get("Topic", ""),
+                            "Priority Level": row.get("Priority Level", ""),
+                            "Sender": row.get("Sender", ""),
+                            "Assigned To": row.get("Assigned To", ""),
+                            "Email Source": row.get("Email Source", ""),
+                            "Spam": row.get("Spam", False)
+                        }
+                        updated_tasks.append(task)
+                    
+                    # Update session state with edited tasks
+                    st.session_state.edited_valid_tasks = updated_tasks
+                    st.success("✅ Changes saved! Tasks have been updated.")
+                    st.rerun()
                 
                 # Show summary stats
                 original_count = len(valid_tasks)

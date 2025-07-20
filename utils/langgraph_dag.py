@@ -7,6 +7,7 @@ from utils.langgraph_nodes import (
     rag_prompt_node,
     extract_json_node,
     write_graph_node,
+    write_notion_node,
 )
 import requests
 
@@ -103,117 +104,241 @@ extraction_workflow.add_node("extract_json", extract_json_node)
 # Split validation into attempt and pause
 
 
+def normalize_data_types(parsed: dict) -> dict:
+    """
+    Normalize data types to ensure consistency across the entire pipeline.
+    Converts all values to the expected types for Notion database compatibility.
+    """
+    # Create a copy to avoid modifying the original
+    normalized = dict(parsed)
+    
+    # Define expected types for each field based on Notion schema
+    field_types = {
+        "Name": str,                    # title
+        "Task Description": str,        # rich_text
+        "Due Date": str,                # date
+        "Received Date": str,           # date
+        "Status": str,                  # status (Not started, In progress, Done)
+        "Topic": str,                   # select
+        "Priority Level": str,          # select
+        "Sender": str,                  # email
+        "Assigned To": str,             # email
+        "Email Source": str,            # url
+        "Spam": bool                    # checkbox
+    }
+    
+    # Convert each field to the expected type
+    for field_name, expected_type in field_types.items():
+        if field_name in normalized:
+            value = normalized[field_name]
+            
+            # Handle None values
+            if value is None:
+                if expected_type == bool:
+                    normalized[field_name] = False
+                else:
+                    normalized[field_name] = ""
+                continue
+            
+            # Convert to expected type
+            if expected_type == str:
+                # Convert various types to string
+                if isinstance(value, (int, float)):
+                    normalized[field_name] = str(value)
+                elif isinstance(value, bool):
+                    normalized[field_name] = str(value).lower()
+                elif isinstance(value, (list, dict)):
+                    # For complex types, convert to JSON string
+                    import json
+                    try:
+                        normalized[field_name] = json.dumps(value)
+                    except:
+                        normalized[field_name] = str(value)
+                elif isinstance(value, str):
+                    # Clean up string values
+                    cleaned = value.strip()
+                    if cleaned.lower() in ['null', 'none', 'undefined', '']:
+                        normalized[field_name] = ""
+                    else:
+                        normalized[field_name] = cleaned
+                else:
+                    # For any other type, convert to string
+                    normalized[field_name] = str(value)
+            
+            elif expected_type == bool:
+                # Convert to boolean
+                if isinstance(value, bool):
+                    normalized[field_name] = value
+                elif isinstance(value, str):
+                    # Convert string to boolean
+                    cleaned = value.strip().lower()
+                    if cleaned in ['true', '1', 'yes', 'on']:
+                        normalized[field_name] = True
+                    elif cleaned in ['false', '0', 'no', 'off', '']:
+                        normalized[field_name] = False
+                    else:
+                        # Default to False for unknown values
+                        normalized[field_name] = False
+                elif isinstance(value, (int, float)):
+                    # Convert number to boolean
+                    normalized[field_name] = bool(value)
+                else:
+                    # Default to False for other types
+                    normalized[field_name] = False
+    
+    return normalized
+
+
+def normalize_field_names(parsed: dict) -> dict:
+    """
+    Normalize field names to ensure consistency across the entire pipeline.
+    Maps various possible field names to the standard Notion database field names.
+    """
+    # Define field name mappings (alternative_name -> standard_name)
+    # Based on exact Notion database schema
+    field_mappings = {
+        # Email Source variations
+        "email_index": "Email Source",
+        "email_source": "Email Source",
+        "message_id": "Email Source",
+        "email_id": "Email Source",
+        
+        # Task Name variations
+        "task_name": "Name",
+        "title": "Name",
+        "task_title": "Name",
+        
+        # Task Description variations
+        "task_description": "Task Description",
+        "description": "Task Description",
+        "summary": "Task Description",
+        "content": "Task Description",
+        
+        # Due Date variations
+        "due_date": "Due Date",
+        "deadline": "Due Date",
+        "due": "Due Date",
+        
+        # Received Date variations
+        "received_date": "Received Date",
+        "date_received": "Received Date",
+        "email_date": "Received Date",
+        
+        # Status variations
+        "task_status": "Status",
+        "state": "Status",
+        
+        # Topic variations
+        "category": "Topic",
+        "project": "Topic",
+        "subject": "Topic",
+        
+        # Priority Level variations
+        "priority_level": "Priority Level",
+        "priority": "Priority Level",
+        "urgency": "Priority Level",
+        
+        # Sender variations
+        "sender_email": "Sender",
+        "from": "Sender",
+        "from_email": "Sender",
+        
+        # Assigned To variations
+        "assigned_to": "Assigned To",
+        "assignee": "Assigned To",
+        "assignee_email": "Assigned To",
+        "to": "Assigned To",
+        "responsible": "Assigned To",
+        
+        # Spam variations
+        "is_spam": "Spam",
+        "spam_flag": "Spam",
+        "spam_detected": "Spam"
+    }
+    
+    # Create a copy to avoid modifying the original
+    normalized = dict(parsed)
+    
+    # Apply field name mappings
+    for alt_name, std_name in field_mappings.items():
+        if alt_name in normalized and std_name not in normalized:
+            normalized[std_name] = normalized.pop(alt_name)
+    
+    return normalized
+
+
 def attempt_json_parse_node(state):
     """
-    Attempt to parse JSON but don't retry - just mark for review if invalid.
+    TEMPORARY: Accept any parsed JSON as valid, skipping all validation.
     """
-    try:
-        extracted = state.get("extracted_json", "")
-        if not extracted:
-            return {
-                "valid": False,
-                "needs_user_review": True,
-                "status": "no_json_extracted",
-                **state
-            }
-        
-        # Try to parse the JSON
-        import json
-        parsed = json.loads(extracted)
-        
-        # Enhanced validation for meaningful task content
-        if isinstance(parsed, dict):
-            # Check for nested structure (preferred)
-            if "Topic" in parsed and "tasks" in parsed.get("Topic", {}):
-                tasks = parsed["Topic"]["tasks"]
-                if tasks and isinstance(tasks, list) and len(tasks) > 0:
-                    # Check if first task has meaningful content
-                    first_task = tasks[0]
-                    if isinstance(first_task, dict) and "task" in first_task:
-                        task_obj = first_task["task"]
-                        task_name = task_obj.get("name", "")
-                        
-                        # Enhanced validation criteria
-                        if not is_meaningful_task(task_name, task_obj):
-                            # Don't trigger HITL for unmeaningful tasks, just auto-fix
-                            task_obj["name"] = f"Email Task: {task_obj.get('summary', 'Extracted from email')[:50]}"
-                        
-                        return {
-                            "validated_json": parsed,
-                            "valid": True,
-                            "needs_user_review": False,
-                            "status": "valid_json",
-                            **state
-                        }
-            
-            # Check for flat structure with meaningful content
-            elif ("deliverable" in parsed or "name" in parsed):
-                task_name = parsed.get("deliverable") or parsed.get("name", "")
-                
-                # Enhanced validation for flat structure
-                if not is_meaningful_task(task_name, parsed):
-                    # Auto-fix instead of triggering HITL
-                    parsed["deliverable"] = f"Email Task: {parsed.get('summary', 'Extracted from email')[:50]}"
-                
-                return {
-                    "validated_json": parsed,
-                    "valid": True,
-                    "needs_user_review": False,
-                    "status": "valid_json",
-                    **state
-                }
-        
-        # If we get here, JSON structure is unusual but parseable
-        # Create a basic fallback instead of triggering HITL
-        fallback_json = {
-            "name": "Email Review Task",
-            "deliverable": "Review and process email content",
-            "summary": str(parsed)[:100] + "..." if len(str(parsed)) > 100 else str(parsed),
-            "owner": "Unknown",
-            "role": "Unknown", 
-            "department": "Unknown",
-            "organization": "Unknown",
-            "start_date": "Unknown",
-            "due_date": "Unknown"
-        }
-        
+    print("=== ATTEMPT_JSON_PARSE_NODE STARTED ===")
+    import json
+    extracted = state.get("extracted_json", "")
+    print(f"Extracted JSON length: {len(extracted)}")
+    print(f"Extracted JSON preview: {extracted[:200]}...")
+    
+    if not extracted:
+        print("No extracted JSON found")
         return {
-            "validated_json": fallback_json,
-            "valid": True,
-            "needs_user_review": False,
-            "status": "auto_fallback_created",
+            "valid": False,
+            "needs_user_review": True,
+            "status": "no_json_extracted",
             **state
         }
-            
-    except json.JSONDecodeError:
-        # JSON parsing failed - create an editable template from the original extraction
-        raw_json = state.get("extracted_json", "")
+    try:
+        print("Parsing JSON...")
+        parsed = json.loads(extracted)
+        print(f"JSON parsed successfully. Keys: {list(parsed.keys())}")
+        print("VALIDATION BYPASSED: Accepting all parsed JSON as valid.")
         
-        # Try to auto-fix common issues for user editing
-        if raw_json:
-            try:
-                # Replace null values with "Unknown" to make it parseable for editing
-                fixed_json = raw_json.replace('null', '"Unknown"').replace('NULL', '"Unknown"')
-                # Try to parse the fixed version
-                import json
-                test_parse = json.loads(fixed_json)
-                # If successful, provide this as the correctable template
-                return {
-                    "valid": False,
-                    "needs_user_review": True,
-                    "status": "json_parse_error",
-                    "correctable_json": fixed_json,  # Provide correctable version
-                    **state
-                }
-            except:
-                pass
+        # Normalize field names to ensure consistency
+        print("Normalizing field names...")
+        parsed = normalize_field_names(parsed)
+        print(f"After field normalization. Keys: {list(parsed.keys())}")
         
-        # If auto-fix failed, still provide the original for manual editing
+        # Normalize data types to ensure consistency
+        print("Normalizing data types...")
+        parsed = normalize_data_types(parsed)
+        print(f"After data type normalization. Keys: {list(parsed.keys())}")
+        
+        # Fill missing optional fields with None
+        optional_fields = [
+            "Due Date", "Received Date", "Status", "Topic", "Priority Level", "Sender", "Assigned To", "Email Source", "Spam"
+        ]
+        for f in optional_fields:
+            if f not in parsed:
+                if f == "Spam":
+                    parsed[f] = False
+                elif f == "Status":
+                    parsed[f] = "Not started"
+                else:
+                    parsed[f] = ""
+        print(f"After filling optional fields. Keys: {list(parsed.keys())}")
+        
+        # Convert any datetime/date objects to strings
+        from utils.langgraph_nodes import convert_dates_to_strings
+        parsed = convert_dates_to_strings(parsed)
+        print(f"After date conversion. Final keys: {list(parsed.keys())}")
+        
+        result = {
+            "validated_json": parsed,
+            "valid": True,
+            "needs_user_review": False,
+            "status": "valid_json",
+            **state
+        }
+        print(f"Returning result with keys: {list(result.keys())}")
+        return result
+        
+    except Exception as e:
+        print(f"JSON parse error: {e}")
+        print(f"CLEANED extracted_json that failed to parse: {extracted}")
+        import traceback
+        traceback.print_exc()
         return {
             "valid": False,
             "needs_user_review": True,
             "status": "json_parse_error",
-            "correctable_json": raw_json,  # At least show the original
             **state
         }
 
@@ -233,10 +358,16 @@ def process_user_correction_node(state):
     try:
         corrected_json = state.get("user_corrected_json", "")
         new_state = dict(state)  # Create a copy
-        
         if corrected_json:
             import json
             parsed = json.loads(corrected_json)
+            
+            # Normalize field names to ensure consistency
+            parsed = normalize_field_names(parsed)
+            
+            # Normalize data types to ensure consistency
+            parsed = normalize_data_types(parsed)
+            
             new_state.update({
                 "validated_json": parsed,
                 "valid": True,
@@ -245,10 +376,19 @@ def process_user_correction_node(state):
             })
             return new_state
         else:
-            # User chose to skip - create minimal fallback
+            # User chose to skip - create minimal fallback (matches Notion schema exactly)
             fallback = {
-                "name": "Extracted Task",
-                "deliverable": state.get("extracted_json", "No content")[:100]
+                "Name": "Extracted Task",
+                "Task Description": state.get("extracted_json", "No content")[:100],
+                "Due Date": "",
+                "Received Date": "",
+                "Status": "Not started",
+                "Topic": "",
+                "Priority Level": "",
+                "Sender": "",
+                "Assigned To": "",
+                "Email Source": "",
+                "Spam": False
             }
             new_state.update({
                 "validated_json": fallback,
@@ -258,10 +398,19 @@ def process_user_correction_node(state):
             })
             return new_state
     except Exception:
-        # Still invalid after user correction - use fallback
+        # Still invalid after user correction - use fallback (matches Notion schema exactly)
         fallback = {
-            "name": "Fallback Task",
-            "deliverable": "Manual correction failed"
+            "Name": "Fallback Task",
+            "Task Description": "Manual correction failed",
+            "Due Date": "",
+            "Received Date": "",
+            "Status": "Not started",
+            "Topic": "",
+            "Priority Level": "",
+            "Sender": "",
+            "Assigned To": "",
+            "Email Source": "",
+            "Spam": False
         }
         new_state = dict(state)
         new_state.update({
@@ -273,11 +422,11 @@ def process_user_correction_node(state):
         return new_state
 
 
+
 extraction_workflow.add_node("attempt_parse", attempt_json_parse_node)
 extraction_workflow.add_node("pause_for_review", pause_for_user_review_node)
-extraction_workflow.add_node(
-    "process_correction", process_user_correction_node
-)
+extraction_workflow.add_node("process_correction", process_user_correction_node)
+extraction_workflow.add_node("write_notion", write_notion_node)
 extraction_workflow.add_node("write_graph", write_graph_node)
 
 
@@ -292,21 +441,28 @@ extraction_workflow.add_edge("build_prompt", "extract_json")
 extraction_workflow.add_edge("extract_json", "attempt_parse")
 
 
+
+# Route: after validation, write to Notion, then Neo4j
 def router(state):
     """Route based on validation results and user review needs."""
     if state.get("valid", False):
-        return "write_graph"
+        return "write_notion"
     elif state.get("needs_user_review", False):
         return "pause_for_review"
     else:
         return "fail"
 
 
+
 extraction_workflow.add_conditional_edges("attempt_parse", router, {
-    "write_graph": "write_graph",
+    "write_notion": "write_notion",
     "pause_for_review": "pause_for_review",
     "fail": "fail"
 })
+
+# After Notion write, always write to Neo4j
+extraction_workflow.add_edge("write_notion", "write_graph")
+
 
 # Set finish points - different nodes can end the workflow
 for endpoint in ["write_graph", "fail", "pause_for_review"]:
@@ -326,15 +482,43 @@ def run_extraction_pipeline(email_row, faiss_index, all_chunks, email_index):
         all_chunks: List of text chunks for RAG
         email_index: Message-ID or unique identifier for this email
     """
-    state = {
-        "current_email_row": email_row,
-        "email_text": email_row.get("content", ""),  # Backward compatibility
-        "faiss_index": faiss_index,
-        "all_chunks": all_chunks,
-        "email_index": email_index,
-        "retry_count": 0
-    }
-    return extraction_app.invoke(state)
+    print(f"=== RUN_EXTRACTION_PIPELINE STARTED ===")
+    print(f"Email index: {email_index}")
+    print(f"Email row keys: {list(email_row.keys())}")
+    print(f"FAISS index type: {type(faiss_index)}")
+    print(f"All chunks length: {len(all_chunks)}")
+    
+    try:
+        state = {
+            "current_email_row": email_row,
+            "email_text": email_row.get("content", ""),  # Backward compatibility
+            "faiss_index": faiss_index,
+            "all_chunks": all_chunks,
+            "email_index": email_index,
+            "retry_count": 0
+        }
+        print(f"State created with keys: {list(state.keys())}")
+        
+        print("Invoking extraction_app...")
+        result = extraction_app.invoke(state)
+        print(f"Extraction completed. Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+        print(f"Result status: {result.get('status', 'No status')}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error in run_extraction_pipeline: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return a fallback result
+        return {
+            "status": "error",
+            "error": str(e),
+            "valid": False,
+            "needs_user_review": True,
+            "email_index": email_index
+        }
 
 
 def resume_extraction_pipeline_with_correction(

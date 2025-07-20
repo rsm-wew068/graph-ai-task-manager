@@ -20,6 +20,17 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: taskmanager
+      POSTGRES_USER: rachelwang
+      POSTGRES_PASSWORD: Rachel%622
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
   app:
     build: .
     ports:
@@ -30,9 +41,15 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=password
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - POSTGRES_DB=taskmanager
+      - POSTGRES_USER=rachelwang
+      - POSTGRES_PASSWORD=Rachel%622
+      - POSTGRES_HOST=postgres
     depends_on:
       neo4j:
         condition: service_healthy
+      postgres:
+        condition: service_started
     volumes:
       - ./.cache:/.cache
       - ./tmp:/tmp
@@ -40,3 +57,4 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs: 
+  pg_data:

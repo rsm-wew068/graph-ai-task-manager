@@ -23,20 +23,20 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen
 
 # Copy all necessary files and directories
-COPY app.py start_services.py ./
+COPY app.py ./
 COPY utils/ ./utils/
 COPY pages/ ./pages/
 COPY .streamlit/ ./.streamlit/
 
-# Make scripts executable
-RUN chmod +x app.py start_services.py
+# Make app executable
+RUN chmod +x app.py
 
-# Expose ports for both services
-EXPOSE 8501 8000
+# Expose port for Streamlit
+EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 ENV PYTHONPATH="${PYTHONPATH}:/app"
 
-# Use the service orchestrator that runs both services
-CMD ["python", "start_services.py"]
+# Start the Streamlit app directly
+CMD ["python", "-m", "streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

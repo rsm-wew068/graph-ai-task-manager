@@ -1,215 +1,159 @@
-# [Automated Task Manager](https://huggingface.co/spaces/rsm-wew068/automated-task-manager)
 
-A production-grade, graph-aware AI assistant for task management, recommendations, and trustworthy GPT answers—grounded in structured, user-uploaded email data and powered by a persistent Neo4j knowledge graph.
+# Automated Task Manager
 
----
-
-## 🚀 Key Features
-
-- **End-to-End Email-to-Graph Pipeline**: Upload Gmail Takeout `.mbox` files, extract actionable tasks, and build a rich knowledge graph in Neo4j.
-- **LangGraph Extraction & Reasoning**: Modular DAGs for robust LLM-based extraction, validation (with HITL), and conversational Q&A.
-- **Neo4j Vector Indexing**: Fast, scalable semantic search and topic matching using native Neo4j vector indexes.
-- **LangChain Agent Integration**: Advanced Cypher generation and answer formatting via LangChain’s Neo4jGraph agent.
-- **Streamlit UI**: Intuitive interfaces for upload, validation, calendar view, and conversational chat with graph visualization.
-- **Human-in-the-Loop (HITL) Validation**: Pause/resume pipeline for user correction of extractions.
+**A production-grade, graph-aware AI assistant for task management, recommendations, and trustworthy GPT answers—grounded in user-uploaded email data and powered by a persistent Neo4j knowledge graph.**
 
 ---
 
-## 🏗️ Architecture Overview
+## 🚀 Features
 
+- **📧 Email-to-Graph Pipeline**: Upload Gmail Takeout `.mbox` files, extract actionable tasks, and build a rich Neo4j knowledge graph
+- **🧠 AI-Powered Extraction**: Modular LangGraph DAGs for robust GPT-based extraction, validation (with HITL), and conversational Q&A
+- **🗄️ Neo4j Vector Indexing**: Fast, scalable semantic search and topic matching using native Neo4j vector indexes
+- **💬 Intelligent AI Chatbot**: Advanced ChainQA system for natural language queries with conversation memory
+- **📅 Visual Task Management**: Interactive calendar view and task organization with Notion integration
+- **🔧 Database Management**: Separate controls for Neo4j and Notion database clearing and management
+- **👥 Human-in-the-Loop (HITL)**: Pause/resume pipeline for user correction of extractions
+- **🚀 Production Ready**: CI/CD pipeline, Docker deployment, and enterprise-grade reliability
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    A[Gmail Takeout (.mbox)] --> B[Preprocessing/Filtering]
+    B --> C[LangGraph Extraction Pipeline]
+    C --> D[HITL Validation]
+    D --> E[Neo4j Graph Construction]
+    E --> F[Vector Indexing]
+    F --> G[ChainQA AI Chatbot]
+    G --> H[Streamlit UI]
+    H --> I[Notion Integration]
 ```
-Gmail Takeout (.mbox) → Preprocessing/Filtering → LangGraph Extraction Pipeline →
-HITL Validation → Neo4j Graph Construction → Vector Indexing →
-LangChain Agent Q&A → Streamlit UI (Chatbot, Calendar, Visualization)
-```
 
-### **Graph Schema**
-```
-(Topic)-[:HAS_TASK]->(Task)-[:RESPONSIBLE_TO]->(Person)-[:HAS_ROLE]->(Role)-[:BELONGS_TO]->(Department)-[:IS_IN]->(Organization)
-                └─[:BASED_ON]->(Summary)
-                └─[:DUE_ON]->(Date)
-                └─[:LINKED_TO]->(Email)
-```
+**Graph Schema:**
+
+    (Topic)-[:HAS_TASK]->(Task)-[:RESPONSIBLE_TO]->(Person)-[:HAS_ROLE]->(Role)-[:BELONGS_TO]->(Department)-[:IS_IN]->(Organization)
+                    └─[:BASED_ON]->(Summary)
+                    └─[:DUE_ON]->(Date)
+                    └─[:LINKED_TO]->(Email)
 
 ---
 
-## 🔄 ETL Pipeline Overview
+## 🔄 ETL Pipeline
 
-This application implements a robust **ETL (Extract, Transform, Load)** pipeline for email-based task management:
+**Extract:**
+- Gmail Takeout `.mbox` files (no size limits)
+- Smart filtering (date, keywords, content length)
+- Structured metadata extraction (From, To, Subject, Body, Message-ID)
 
-### **Extract** 📥
-- **Source**: Gmail Takeout `.mbox` files
-- **Smart Filtering**: Date range, keywords, content length, email types
-- **Email Parsing**: Structured extraction of metadata (From, To, Subject, Body, Message-ID)
-- **Content Processing**: First 200MB processed for optimal performance
+**Transform:**
+- RAG-enhanced extraction (contextual LLM prompt with similar emails)
+- LangGraph pipeline: GPT-4 converts unstructured content to structured JSON
+- Entity extraction: tasks, people, roles, organizations, dates
+- HITL validation for data quality
+- Graph construction (Neo4j Cypher)
+- Vector embeddings for semantic search
 
-### **Transform** ⚙️
-- **RAG-Enhanced Extraction**: For each email, the system retrieves similar email chunks from your dataset using a local vector index (e.g., FAISS or in-memory embeddings). The LLM prompt is constructed with the main email and up to two related email chunks as additional context. The LLM then extracts structured entities (tasks, people, dates, etc.) from the email, grounded in both the email and its context.
-- **LLM Processing**: LangGraph pipeline uses GPT-4 to convert unstructured email content into structured JSON
-- **Entity Extraction**: Tasks, people, roles, departments, organizations, dates
-- **Data Validation**: Human-in-the-Loop (HITL) validation for data quality
-- **Graph Construction**: Hierarchical node formatting with relationship mapping (all via Neo4j Cypher)
-- **Semantic Enrichment**: Vector embeddings for similarity search and topic matching (Neo4j vector index)
+**Load:**
+- Neo4j graph database (persistent, scalable)
+- Notion database integration for task management
+- Multiple interfaces: tabular, calendar, graph query
 
-### **Load** 📊
-- **Neo4j Graph Database**: Master knowledge graph with enhanced node hierarchy, persistent and scalable
-- **Multiple Interfaces**: 
-  - **Tabular View**: Flattened task data in Main Page
-  - **Calendar View**: Time-based visualization
-  - **Graph Database**: Interactive GraphRAG query system (Neo4j backend)
-
-### **Query & Analytics** 🔍
-- **GraphRAG**: Topic-centered semantic search with graph traversal (Neo4j)
-- **Natural Language Interface**: Conversational AI chatbot (LangChain agent)
-- **Interactive Visualization**: Pyvis-based interactive graph visualization with drag-and-drop, zoom, and filtering capabilities
-
-This ETL approach ensures reliable, scalable processing of large email datasets while maintaining data quality through validation workflows and persistent graph storage in Neo4j.
+**Query & Analytics:**
+- Conversational AI chatbot with ChainQA reasoning
+- Interactive graph visualization
+- Natural language task queries
 
 ---
 
-## 🧠 End-to-End Pipeline
-
-1. **User Uploads .mbox Email File**
-   - Source: Gmail Takeout
-   - Format: `.mbox` file
-2. **Preprocessing / Filtering**
-   - Extracts metadata (Message-ID, Subject, Date, From, To, CC, Body)
-   - Filters out auto-notifications, empty/short replies, out-of-range dates
-3. **LangGraph Extraction Pipeline**
-   - Nodes: chunk embedding, context retrieval, prompt generation, LLM JSON extraction, validation, HITL, write to Neo4j
-   - Pauses for user correction if extraction is invalid
-4. **Neo4j Knowledge Graph Storage**
-   - All entities and relationships stored in Neo4j with rich schema
-   - Embeddings stored as vector properties for semantic search
-5. **Neo4j Vector Indexing**
-   - Fast topic and node similarity search using native vector index
-6. **LangChain Agent Q&A**
-   - Natural language queries answered via LangChain agent with Cypher generation and answer formatting
-   - Supports advanced, multi-hop graph queries
-7. **Streamlit UI**
-   - Main Page: Upload, process, validate, view tasks
-   - Calendar View: Visualize tasks by due date
-   - AI Chatbot: Conversational Q&A with interactive Pyvis graph visualization and query tips
-   - HITL Modal: Edit/approve invalid extractions
-
----
-
-## 🧩 Project Structure
+## 📁 Project Structure
 
 | File | Purpose |
 |------|---------|
+| `app.py` | Main Streamlit application with database management |
+| `gmail_app.py` | Gmail integration with real-time processing |
 | `utils/email_parser.py` | Parses Gmail Takeout `.mbox` into structured DataFrame |
 | `utils/embedding.py` | Chunks, embeds, builds semantic index |
 | `utils/graph_writer.py` | Converts extracted JSON to Neo4j graph via Cypher |
-| `utils/graphrag.py` | GraphRAG query system, semantic search (Neo4j vector index) |
 | `utils/langchain_neo4j_agent.py` | LangChain Neo4jGraph agent for advanced Q&A |
-| `utils/prompt_template.py` | Prompt templates for LLM extraction and reasoning |
+| `utils/chainqa_graph_agent.py` | Multi-step reasoning for complex graph queries |
+| `utils/langgraph_unified_memory_agent.py` | Conversation memory and context management |
+| `utils/prompt_template.py` | Centralized prompt templates for LLM interactions |
 | `utils/langgraph_nodes.py` | LangGraph node definitions for pipeline steps |
 | `utils/langgraph_dag.py` | Defines LangGraph DAGs: extraction and chat agent |
-| `app.py` | Main Streamlit application (home page) |
-| `start_services.py` | Service orchestrator (starts both FastAPI and Streamlit) |
-| `pages/My_Calendar.py` | Calendar view of tasks |
-| `pages/AI_Chatbot.py` | Chatbot interface for graph-based QA |
+| `utils/notion_utils.py` | Notion API integration for task synchronization |
+| `pages/My_Calendar.py` | Calendar view of tasks with Notion integration |
+| `pages/AI_Chatbot.py` | Enhanced chatbot interface with conversation memory |
 | `requirements.txt` | Python dependencies |
+| `Dockerfile` | Container configuration for deployment |
+| `docker-compose.yml` | Multi-service deployment with Neo4j |
 
 ---
 
-## 🔍 Human-in-the-Loop (HITL) Validation
+## ⚙️ Quick Start
 
-- Pipeline pauses for user review if:
-  - JSON parsing fails
-  - JSON is missing required fields
-  - No JSON extracted from email
-  - Email metadata is inconsistent/incomplete
-- User can edit/correct extraction and resume pipeline
-
----
-
-## 🧠 Conversational Q&A (LangChain Agent)
-
-- User enters a natural language query (e.g., “What tasks are due next week?”)
-- LangChain agent:
-  1. Performs semantic search (Neo4j vector index)
-  2. Generates Cypher queries for Neo4j
-  3. Formats answers using LLM
-  4. Streams results to UI
-- Supports multi-hop, context-rich queries and answer formatting
-
----
-
-## 🕸️ Neo4j Vector Indexing
-
-- Node embeddings stored as `vector` property on each node
-- Vector index created for fast similarity search
-- Semantic search and topic matching performed natively in Neo4j
-
----
-
-## 🖼️ Streamlit UI
-
-- **Main Page**: Upload, process, validate, view tasks
-- **Calendar View**: Visualize tasks by due date
-- **AI Chatbot**: Conversational Q&A, graph visualization, query tips
-- **HITL Modal**: Edit/approve invalid extractions
-
----
-
-## ⚙️ Configuration & Deployment
-
-- **Neo4j Connection**: Store credentials in `.env` (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`)
-- **OpenAI API Key**: Required for LLM processing (`OPENAI_API_KEY`)
-- **Docker Support**: Use `host.docker.internal` for cross-container access
-- **CI/CD**: GitHub Actions for build, test, and deployment (see `.github/workflows/ci.yml`)
-- **Secrets**: Store sensitive values as GitHub Actions secrets
-
-### **Quick Start (GitHub)**
-
-1. **Clone the repository**:
+1. **Clone the repository:**
    ```bash
    git clone https://github.com/yourusername/graph-ai-task-manager.git
    cd graph-ai-task-manager
    ```
 
-2. **Install dependencies**:
+2. **Install dependencies:**
    ```bash
+   pip install -r requirements.txt
+   # Or using uv (recommended):
    uv sync
    ```
 
-3. **Set environment variables**: Create `.env` file with Neo4j and OpenAI credentials
+3. **Set environment variables:** Create `.env` with:
+   ```env
+   NEO4J_URI=bolt://localhost:7687
+   NEO4J_USER=neo4j
+   NEO4J_PASSWORD=password
+   OPENAI_API_KEY=your_openai_api_key
+   NOTION_API_KEY=your_notion_api_key
+   NOTION_DATABASE_ID=your_notion_database_id
+   ```
 
-4. **Start with Docker Compose** (recommended):
+4. **Start with Docker Compose (recommended):**
    ```bash
    docker-compose up -d
    ```
 
-5. **Or start manually**:
+5. **Or start manually:**
    ```bash
-   python start_services.py
+   streamlit run app.py
    ```
 
-6. **Access the application**:
-   - Streamlit UI: http://localhost:8501
-   - FastAPI Backend: http://localhost:8000
-   - Neo4j Browser: http://localhost:7474
-
-### **Docker Deployment**
-
-```bash
-docker build -t task-manager .
-docker run -p 8501:8501 -p 8000:8000 task-manager
-```
+6. **Access the app:**
+   - 📱 Streamlit UI: http://localhost:8501
+   - 📊 Neo4j Browser: http://localhost:7474
+   - 🤖 AI Chatbot: http://localhost:8501/AI_Chatbot
+   - 📅 Calendar View: http://localhost:8501/My_Calendar
 
 ---
 
-## 📝 Example Usage: LangChain Neo4j Agent
+## 🎯 Key Capabilities
 
-```python
-from utils.langchain_neo4j_agent import answer_with_neo4j_agent
+### **AI Chatbot Features:**
+- **Dynamic Query Processing**: Intelligent routing for task queries, conversation history, and help requests
+- **Conversation Memory**: Remembers previous questions and context
+- **ChainQA Reasoning**: Multi-step reasoning for complex graph queries
+- **Real-time Database Access**: Direct Neo4j queries for accurate task information
 
-query = "Who is responsible for Capstone Project tasks due next week?"
-answer = answer_with_neo4j_agent(query)
-print(answer)
-```
+### **Task Management:**
+- **No Email Limits**: Process entire email archives without artificial size restrictions
+- **Human-in-the-Loop Editing**: Review and edit extracted tasks before saving
+- **Notion Integration**: Sync tasks with Notion database for external management
+- **Database Management**: Separate controls for Neo4j and Notion database clearing
+
+### **Production Features:**
+- **CI/CD Pipeline**: Automated testing and deployment via GitHub Actions
+- **Docker Support**: Containerized deployment for scalability
+- **Error Handling**: Robust error handling and user feedback
+- **Performance Optimized**: Efficient processing and memory management
 
 ---
 
@@ -217,12 +161,34 @@ print(answer)
 
 | Feature                        | Enabled by                |
 |--------------------------------|---------------------------|
-| Structured email → graph       | LangGraph                 |
-| Persistent knowledge graph     | Neo4j                     |
+| Structured email → graph       | LangGraph + ChainQA       |
+| Persistent knowledge graph     | Neo4j + Vector Indexing   |
 | Smart queries                  | LangChain + Cypher        |
-| Conversational QA              | LangChain agent           |
-| Visual calendar                | Streamlit                 |
-| Editable extraction            | HITL validation (LangGraph)|
+| Conversational QA              | ChainQA + Memory Agent    |
+| Visual calendar                | Streamlit + Notion        |
+| Editable extraction            | HITL validation           |
+| Production deployment          | Docker + CI/CD            |
+
+---
+
+## 🚀 Deployment
+
+### **Local Development:**
+```bash
+streamlit run app.py
+```
+
+### **Docker Deployment:**
+```bash
+docker build -t task-manager .
+docker run -p 8501:8501 task-manager
+```
+
+### **Cloud Deployment:**
+- **Railway**: Connect GitHub repo, set environment variables
+- **Render**: Web service with automatic deployments
+- **Heroku**: Container deployment with Procfile
+- **Google Cloud Run**: Containerized deployment
 
 ---
 
@@ -231,5 +197,4 @@ print(answer)
 - [LangChain Neo4jGraph](https://python.langchain.com/docs/integrations/graph/neo4j)
 - [LangGraph](https://langchain-ai.github.io/langgraph/)
 - [Streamlit](https://streamlit.io/)
-
----
+- [ChainQA](https://arxiv.org/abs/2304.03442)

@@ -1,8 +1,6 @@
 import streamlit as st
 import uuid
-import requests
-import io
-import contextlib
+ 
 
 try:
     from utils.langgraph_dag import run_agent_chat_round
@@ -14,7 +12,6 @@ try:
         clear_conversation
     )
     from utils.chainqa_graph_agent import chainqa_graph_search, stream_chainqa_graph_search
-    from utils.graphrag import GraphRAG
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -188,6 +185,27 @@ if (hasattr(st.session_state, 'processing_complete') and st.session_state.proces
         f"📊 Ready to answer questions about {valid_tasks_count} tasks "
         f"from your processed emails"
     )
+    
+    # Check Neo4j connection status
+    try:
+        from neo4j import GraphDatabase
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        NEO4J_URI = os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
+        NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+        NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+        
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        with driver.session() as session:
+            result = session.run("MATCH (t:Task) RETURN count(t) as count")
+            task_count = result.single()["count"]
+            st.success(f"🗄️ Connected to Neo4j database with {task_count} tasks")
+        driver.close()
+    except Exception as e:
+        st.warning(f"⚠️ Neo4j connection issue: {str(e)}")
+        
 elif (hasattr(st.session_state, 'parsing_complete') and st.session_state.parsing_complete):
     st.warning(
         "📁 Emails parsed but not yet processed with LLM. "
@@ -260,7 +278,10 @@ with chat_container:
 <div style="text-align: center; padding: 3rem 1rem; color: #6b7280;">
     <h2 style="margin: 0 0 1rem 0; color: #374151;">How can I help you today?</h2>
     <p style="margin: 0; font-size: 1.1rem;">
-        Ask me about your tasks, projects, or anything else!
+        I can help you with tasks, projects, and anything in your email data!
+    </p>
+    <p style="margin: 1rem 0 0 0; font-size: 0.9rem; color: #9ca3af;">
+        💡 Try asking: "What data do you have?" or "What can you help me with?"
     </p>
 </div>
             """, unsafe_allow_html=True
@@ -280,65 +301,216 @@ if user_query:
     # Add user message to chat
     with chat_container:
         st.chat_message("user").write(user_query)
-        
+
         # Streaming assistant response
         assistant_placeholder = st.chat_message("assistant").empty()
-        
+
         # Show typing indicator
         with assistant_placeholder:
             st.markdown('<span class="loading-dots">AI is thinking</span>', unsafe_allow_html=True)
-        
+
         tokens = []
         strategy_used = None
         intent_analysis = None
-        
+
+        def is_conversation_history_query(query: str) -> bool:
+            import re
+            conversation_patterns = [
+                r'\b(what did|what was|what were|what have|what has)\b',
+                r'\b(earlier|before|previously|last time|yesterday)\b',
+                r'\b(conversation|chat|talk|discussion)\b',
+                r'\b(you said|you mentioned|you told)\b',
+                r'\b(remember|recall|remind)\b',
+                r'\b(we discussed|we talked about|we covered)\b',
+                r'\b(follow up|follow-up|followup)\b',
+                r'\b(continue|continue from|pick up)\b',
+                r'\b(what did i just|what did you just|what was my last|what was your last)\b',
+                r'\b(just asked|just said|just mentioned)\b',
+                r'\b(repeat|say again|tell me again)\b'
+            ]
+            query_lower = query.lower()
+            return any(re.search(pattern, query_lower) for pattern in conversation_patterns)
+
         try:
-            # Use ChainQA for graph queries, fallback to simple memory for conversation
-            if any(keyword in user_query.lower() for keyword in ['who', 'when', 'what', 'where', 'project', 'task', 'due', 'responsible', 'working']):
+            # Enhanced routing: check for task-specific queries first
+            task_keywords = ['task', 'tasks', 'project', 'projects', 'due', 'deadline', 'responsible', 'assign', 'work', 'todo', 'action']
+            is_task_query = any(keyword in user_query.lower() for keyword in task_keywords)
+            
+            # Check for help queries
+            help_keywords = ['help', 'what can you', 'what do you know', 'what data', 'what information', 'show me what', 'what is available']
+            is_help_query = any(keyword in user_query.lower() for keyword in help_keywords)
+            
+            assistant_message = ""  # Always define as string
+            if is_help_query:
+                # Show what data is available in the database
+                try:
+                    from neo4j import GraphDatabase
+                    import os
+                    from dotenv import load_dotenv
+                    load_dotenv()
+                    
+                    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
+                    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+                    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+                    
+                    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+                    
+                    with driver.session() as session:
+                        # Get database overview
+                        result = session.run("""
+                            MATCH (n)
+                            RETURN labels(n) as labels, count(n) as count
+                            ORDER BY count DESC
+                        """)
+                        node_counts = list(result)
+                        
+                        # Get sample tasks
+                        result = session.run("MATCH (t:Task) RETURN t.name as name LIMIT 5")
+                        sample_tasks = list(result)
+                        
+                        # Get sample people
+                        result = session.run("MATCH (p:Person) RETURN p.name as name LIMIT 5")
+                        sample_people = list(result)
+                        
+                        assistant_message = "**Here's what I can help you with based on your data:**\n\n"
+                        
+                        if node_counts:
+                            assistant_message += "**📊 Database Overview:**\n"
+                            for item in node_counts:
+                                labels = item['labels'][0] if item['labels'] else 'Unknown'
+                                assistant_message += f"• {labels}: {item['count']} items\n"
+                        
+                        if sample_tasks:
+                            assistant_message += f"\n**📋 Sample Tasks:**\n"
+                            for task in sample_tasks:
+                                assistant_message += f"• {task['name']}\n"
+                        
+                        if sample_people:
+                            assistant_message += f"\n**👥 Sample People:**\n"
+                            for person in sample_people:
+                                assistant_message += f"• {person['name']}\n"
+                        
+                        assistant_message += "\n**💡 You can ask me questions like:**\n"
+                        assistant_message += "• \"What tasks do I have?\"\n"
+                        assistant_message += "• \"Who is responsible for [specific task]?\"\n"
+                        assistant_message += "• \"What's due this week?\"\n"
+                        assistant_message += "• \"Show me all my projects\"\n"
+                        assistant_message += "• \"What did we discuss earlier?\"\n"
+                        
+                        strategy_used = "help_query"
+                        intent_analysis = {"intent": "help", "confidence": 0.9}
+                    
+                    driver.close()
+                    
+                except Exception as e:
+                    assistant_message = f"I encountered an error while checking your data: {str(e)}"
+                    strategy_used = "help_query_error"
+                    intent_analysis = {"intent": "error", "confidence": 0.0}
+                    
+            elif is_task_query:
+                # Use ChainQA for all task-related questions (dynamic approach)
+                try:
+                    chainqa_result = chainqa_graph_search(user_query)
+                    if chainqa_result.get("success"):
+                        assistant_message = str(chainqa_result.get("answer", ""))
+                        strategy_used = "chainqa_graph_search"
+                        intent_analysis = {"intent": "task_data", "confidence": 0.9}
+                    else:
+                        assistant_message = f"I couldn't find specific information about that in your task data. {chainqa_result.get('answer', '')}"
+                        strategy_used = "chainqa_graph_search_no_results"
+                        intent_analysis = {"intent": "task_data", "confidence": 0.3}
+                except Exception as e:
+                    assistant_message = f"I encountered an error while querying your task data: {str(e)}. Please try rephrasing your question."
+                    strategy_used = "chainqa_graph_search_error"
+                    intent_analysis = {"intent": "error", "confidence": 0.0}
+            elif is_conversation_history_query(user_query):
+                # Use simple memory for conversation-history queries
+                try:
+                    # First, get the conversation history
+                    history = get_conversation_history(st.session_state.conversation_id)
+                    
+                    if history:
+                        # Show recent conversation history
+                        assistant_message = "Here's what we've discussed recently:\n\n"
+                        for i, turn in enumerate(history[-3:], 1):  # Show last 3 turns
+                            assistant_message += f"**Turn {i}:**\n"
+                            assistant_message += f"**You:** {turn['user']}\n"
+                            assistant_message += f"**Me:** {turn['assistant']}\n\n"
+                        
+                        if "what did i just ask" in user_query.lower():
+                            if history:
+                                last_user_message = history[-1]['user']
+                                assistant_message = f"Your last question was: **\"{last_user_message}\"**"
+                            else:
+                                assistant_message = "I don't see any previous questions in our conversation."
+                    else:
+                        assistant_message = "We haven't had any previous conversation yet. This is our first exchange!"
+                    
+                    strategy_used = "conversation_history"
+                    intent_analysis = {"intent": "conversation_history", "confidence": 0.9}
+                    
+                except Exception as e:
+                    assistant_message = f"I encountered an error while retrieving our conversation history: {str(e)}"
+                    strategy_used = "conversation_history_error"
+                    intent_analysis = {"intent": "error", "confidence": 0.0}
+            elif any(keyword in user_query.lower() for keyword in ['who', 'when', 'what', 'where', 'project', 'due', 'responsible', 'working']):
                 # Use ChainQA for graph-related queries (non-streaming version)
-                result = chainqa_graph_search(user_query)
-                
-                # Clear typing indicator
+                chainqa_result = {}
+                temp_val3 = chainqa_graph_search(user_query)
+                if isinstance(temp_val3, dict):
+                    chainqa_result = temp_val3
                 assistant_placeholder.empty()
-                
-                if result["success"]:
-                    assistant_message = result["answer"]
+                if chainqa_result.get("success"):
+                    assistant_message = str(chainqa_result.get("answer", ""))
                     assistant_placeholder.write(assistant_message)
                     strategy_used = "chainqa_graph_search"
                     intent_analysis = {"intent": "graph_data", "confidence": 0.9}
-                else:
-                    error_message = f"I encountered an error while processing your request: {result['answer']}"
+                elif chainqa_result:
+                    error_message = f"I encountered an error while processing your request: {chainqa_result.get('answer', 'Unknown error')}"
+                    assistant_message = error_message
                     assistant_placeholder.write(error_message)
                     strategy_used = "chainqa_graph_search_error"
                     intent_analysis = {"intent": "error", "confidence": 0.0}
-                
+                else:
+                    error_message = "I encountered an unknown error while processing your request."
+                    assistant_message = error_message
+                    assistant_placeholder.write(error_message)
+                    strategy_used = "chainqa_graph_search_error"
+                    intent_analysis = {"intent": "error", "confidence": 0.0}
             else:
-                # Use simple memory for conversation queries
-                stream = stream_simple_memory(user_query, "user123", st.session_state.conversation_id)
-                
-                # Clear typing indicator and start streaming
-                assistant_placeholder.empty()
-                
-                for token in stream:
-                    tokens.append(token)
-                    assistant_placeholder.write("".join(tokens))
-                
-                # Get the final result metadata
-                result = stream.send(None)  # Get the final metadata
-                strategy_used = result.get("search_strategy", "unknown")
-                intent_analysis = result.get("intent_analysis", {})
-            
+                # Use simple memory for other conversation queries
+                try:
+                    # Use the simple memory system for general conversation
+                    stream = stream_simple_memory(user_query, "user123", st.session_state.conversation_id)
+                    assistant_placeholder.empty()
+                    for token in stream:
+                        tokens.append(token)
+                        assistant_placeholder.write("".join(tokens))
+                    memory_result2 = {}
+                    try:
+                        temp_val4 = stream.send(None)
+                        if isinstance(temp_val4, dict):
+                            memory_result2 = temp_val4
+                    except StopIteration as e:
+                        temp_val5 = getattr(e, 'value', None)
+                        if isinstance(temp_val5, dict):
+                            memory_result2 = temp_val5
+                    strategy_used = memory_result2.get("search_strategy", "conversation_only")
+                    intent_analysis = memory_result2.get("intent_analysis", {})
+                    assistant_message = "".join(tokens)
+                except Exception as e:
+                    assistant_message = f"I encountered an error while processing your request: {str(e)}. Please try rephrasing your question."
+                    strategy_used = "conversation_error"
+                    intent_analysis = {"intent": "error", "confidence": 0.0}
+
             # Update chat history
-            if 'assistant_message' not in locals():
-                assistant_message = "".join(tokens)
             st.session_state.chat_history.append({
                 "user": user_query,
                 "assistant": assistant_message
             })
-            
+
         except Exception as e:
             st.error(f"Error generating response: {str(e)}")
-            # Provide a more helpful error message
             error_message = f"""I encountered an error while processing your request: {str(e)}
 
 This might be due to:

@@ -1,7 +1,7 @@
 from langchain.prompts import PromptTemplate
 
 # Prompt for reasoning
-reason_prompt = PromptTemplate.from_template("""
+definition_reason_prompt = """
 You are a helpful assistant with access to task management data from a knowledge graph.
 
 First, analyze the user's question to determine its intent:
@@ -24,7 +24,8 @@ Task Management Context (use only if relevant to the question):
 
 User Question:
 {name} — {input}
-""")
+"""
+reason_prompt = PromptTemplate.from_template(definition_reason_prompt)
 
 # Prompt for verifying the LLM's answer
 verify_prompt = PromptTemplate.from_template(
@@ -46,77 +47,118 @@ Original Answer:
 Final Answer (improved):
 """)
 
-# Prompt for RAG-based task extraction from email content
+# Prompt for ChainQA answer generation
+chainqa_answer_prompt = PromptTemplate.from_template(
+    """You are a helpful AI assistant that provides COMPLETE and ACCURATE answers based on database data.
+    
+    Question: {question}
+    
+    DATA ANALYSIS:
+    - Total entities found: {entity_count}
+    - Discovery data: {discovery_data}
+    - Exploration data: {exploration_data}
+    - Reasoning: {reasoning}
+    
+    CRITICAL REQUIREMENTS:
+    
+    1. **COUNT QUERIES** (when asked "how many"):
+       - Provide EXACT count from the data
+       - If data shows 14 entities but only 6 unique tasks, explain the difference
+       - Say "I found X unique tasks" and "Y total entities (including duplicates)"
+    
+    2. **LIST QUERIES** (when asked "show all", "list", "what tasks"):
+       - Show EVERY SINGLE ITEM found, no truncation
+       - Organize by categories if possible
+       - Remove duplicates and say "X unique items found"
+       - Use bullet points for readability
+    
+    3. **PERSON QUERIES** (when asked "who is X"):
+       - Find ALL information about the person
+       - Show their role, department, contact info if available
+       - List ALL tasks/relationships involving this person
+       - If limited info, say "Limited information available: [what we know]"
+    
+    4. **GENERAL REQUIREMENTS**:
+       - Be SPECIFIC and PRECISE
+       - Include ALL relevant details
+       - Explain any data inconsistencies
+       - If data is incomplete, acknowledge it
+       - Use clear formatting with bullet points
+    
+    EXAMPLES OF GOOD RESPONSES:
+    
+    For "How many tasks are about packages?":
+    "I found 14 entities related to packages, but only 6 unique tasks:
+    • Pick up package from mailroom (appears 3 times)
+    • Pick up package from Nuevo East mail room (appears 3 times)
+    Total: 6 unique package pickup tasks"
+    
+    For "Who is Kyle?":
+    "Based on the data, Kyle is mentioned in 1 task:
+    • Task: Reschedule meeting with Kyle
+    • Email source: [email address]
+    Unfortunately, no additional personal details (role, department, contact) are available in the database."
+    
+    For "Show me all my tasks":
+    "I found 17 total entities representing 11 unique tasks:
+    
+    **Meeting/Appointment Tasks:**
+    • Reschedule meeting with Kyle
+    • Reschedule coaching appointment (appears 2 times)
+    
+    **Package Pickup Tasks:**
+    • Pick up package from mailroom (appears 3 times)
+    • Pick up package from Nuevo East mail room (appears 3 times)
+    
+    **Maintenance/Repair Tasks:**
+    • Submit FixIt request for repairs
+    
+    **Administrative Tasks:**
+    • Recall message 'Rubio's in MPR2'
+    • Complete Triton Food Pantry Survey
+    • Confirm or update access receipt
+    
+    **Other Tasks:**
+    • Clean common areas
+    • Return apartment keys
+    
+    Total: 11 unique tasks across 17 total entities"
+    
+    Provide a comprehensive, accurate, and well-organized response.
+    """
+)
+
 example_json = '''{{
-  "Topic": {{
-    "name": "Deal Blotter",
-    "tasks": [
-      {{
-        "email_index": "<26322156.1075841888052.JavaMail.evans@thyme>",
-        "task": {{
-          "name": "Ensure off-peak deals are entered correctly in the deal blotter by checking settings and deal entry methods.",
-          "summary": "The email discusses issues with the default settings for traders' deal blotters and seeks a solution for correctly entering off-peak deals.",
-          "start_date": "2001-01-18",
-          "due_date": "2001-01-25",
-          "owner": {{
-            "name": "Kate Symes",
-            "role": "Senior Power Trader",
-            "department": "Trading",
-            "organization": "Enron"
-          }},
-          "collaborators": [
-            {{
-              "name": "Duong Luu",
-              "role": "Trader",
-              "department": "Southwest Desk",
-              "organization": "Enron"
-            }},
-            {{
-              "name": "Will Smith",
-              "role": "Trader",
-              "department": "Southwest Desk",
-              "organization": "Enron"
-            }}
-          ]
-        }}
-      }},
-      {{
-        "email_index": "<4004888.1075841931363.JavaMail.evans@thyme>",
-        "task": {{
-          "name": "Ensure off-peak deals are entered correctly in the deal blotter by verifying settings and entries.",
-          "summary": "The email discusses issues with the default settings for the deal blotter, specifically concerning the entry of off-peak deals and the inclusion of Sundays and holidays.",
-          "start_date": "2001-01-18",
-          "due_date": "2001-02-01",
-          "owner": {{
-            "name": "Kate Symes",
-            "role": "Senior Power Trader",
-            "department": "Trading",
-            "organization": "Enron"
-          }},
-          "collaborators": [
-            {{
-              "name": "Unknown",
-              "role": "Unknown",
-              "department": "Unknown",
-              "organization": "Unknown"
-            }}
-          ]
-        }}
-      }}
-    ]
-  }}
+  "Name": "Submit onboarding documents",
+  "Task Description": "The HR team requests that you upload your onboarding forms before your start date.",
+  "Due Date": "2025-07-20",
+  "Received Date": "2025-07-18",
+  "Status": "Not started",
+  "Topic": "HR Onboarding",
+  "Priority Level": "P1",
+  "Sender": "hr@company.com",
+  "Assigned To": "rachel@ucsd.edu",
+  "Email Source": "<message-id-from-header>",
+  "Spam": false
 }}'''
 
 rag_extraction_prompt = PromptTemplate.from_template(f"""
 You are reviewing an email that contains task-related information.
 
 Your task is to:
-- Extract ONE actionable task from the main email
-- Use all available email metadata (sender, recipients, dates, subject) to
-  enrich the task details
-- Identify the task owner from email participants (From, To, Cc fields)
-- Extract or infer task deadlines from the email content and context
-- Return valid structured JSON
+- Extract ONE actionable task from the email content and metadata
+- Fill in the following fields for the Notion database:
+  - Name: Task name (short, clear title of the task)
+  - Task Description: Summary or instruction (what needs to be done)
+  - Due Date: Date the task is due (if stated or implied)
+  - Received Date: Date the email was received (use the raw email's 'Date' field)
+  - Status: Choose one of [Not started, In progress, Done] based on context (or leave as 'Not started' if unclear)
+  - Topic: Topic category (e.g., Capstone Project, Housing, Finance) inferred from subject or content
+  - Priority Level: One of [P1, P2, P3] if inferred from subject line or urgency cues (else null)
+  - Sender: Email address from the 'From' field
+  - Assigned To: Email of the person expected to complete the task (from context, 'To', or inferred)
+  - Email Source: Message-ID from the email metadata
+  - Spam: Boolean indicating if this appears to be spam (true/false)
 
 EMAIL TO ANALYZE:
 \"\"\"
@@ -129,28 +171,27 @@ RELATED CONTEXT (for reference only):
 {{related_email_2}}
 
 EXTRACTION GUIDELINES:
-1. EMAIL_INDEX: Message-ID is email_index
-   - Use the Message-ID field from email metadata as the email_index value
-
-2. OWNER IDENTIFICATION: Use email metadata to identify task owners:
+1. OWNER IDENTIFICATION: Use email metadata to identify task owners:
    - The "Name-From" field often indicates who is assigning or reporting on the task
    - The "Name-To" field indicates primary recipients/responsible parties
    - If names are not in headers, parse from email signatures/content
-   - You must return a name. If you cannot identify it from the email content, you should extract it from Name-From, Name-To fields
+   - You must return an email address. If you cannot identify it from the email content, you should extract it from From, To fields
 
-3. DEADLINE EXTRACTION: Look for dates in:
+2. DEADLINE EXTRACTION: Look for dates in:
    - Email content mentioning "due", "deadline", "by [date]", "before"
    - Subject line dates or urgency indicators
    - Email timestamps as context for relative dates ("by Friday", "next week")
-   - FALLBACK: If no start date is mentioned in the email content, use the 
-     email's sent date as the start_date
 
 3. TASK CONTEXT: Use subject line and email metadata to understand:
    - Priority level from subject indicators (URGENT, FYI, etc.)
    - Department/team context from sender domains and signatures
    - Project/topic context from subject prefixes or email threads
 
-4. COLLABORATORS: Identify from From/To/Cc/Bcc fields and email content mentions
+4. SPAM DETECTION: Mark as spam if:
+   - Email appears to be automated/marketing
+   - Contains suspicious links or requests
+   - From unknown or suspicious senders
+   - Contains typical spam indicators
 
 OUTPUT FORMAT: Return ONLY valid JSON (no markdown, no comments):
 
@@ -163,6 +204,7 @@ CRITICAL JSON FORMATTING RULES:
 - Do not include markdown, backticks, or comments
 - Ensure all braces and brackets are properly closed
 - Use null for missing dates, not empty strings
+- Use true/false for boolean values, not "true"/"false"
 
 Context:
 \"\"\"

@@ -1,7 +1,53 @@
+import re
 import os
-from datetime import datetime
+from datetime import datetime, date
 from langchain_openai import ChatOpenAI
 import requests
+import re
+from utils.notion_utils import create_task_in_notion
+from utils.prompt_template import rag_extraction_prompt, reason_prompt
+from utils.embedding import retrieve_similar_chunks
+from utils.graph_writer import write_tasks_to_neo4j
+import time
+
+def convert_dates_to_strings(obj):
+    if isinstance(obj, dict):
+        return {k: convert_dates_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_dates_to_strings(i) for i in obj]
+    elif isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    else:
+        return obj
+
+# Node: write to Notion database
+def write_notion_node(state):
+    """
+    Insert the extracted/validated task into the Notion database using the exact field names from the schema.
+    """
+    print("=== WRITE_NOTION_NODE STARTED ===")
+    extracted = state["validated_json"]
+    print(f"Extracted task: {extracted}")
+    
+    notion_task = {
+        "Name": extracted.get("Name", "Unnamed Task"),
+        "Task Description": extracted.get("Task Description", ""),
+        "Due Date": extracted.get("Due Date"),
+        "Received Date": extracted.get("Received Date"),
+        "Status": extracted.get("Status", "Not started"),
+        "Topic": extracted.get("Topic", ""),
+        "Priority Level": extracted.get("Priority Level", ""),
+        "Sender": extracted.get("Sender", ""),
+        "Assigned To": extracted.get("Assigned To", ""),
+        "Email Source": extracted.get("Email Source", ""),
+        "Spam": extracted.get("Spam", False)
+    }
+    print(f"Notion task prepared: {notion_task}")
+    
+    notion_id = create_task_in_notion(notion_task)
+    print(f"Notion task created with ID: {notion_id}")
+    
+    return {"notion_status": "success" if notion_id else "error", "notion_id": notion_id, **state}
 
 # Handle dotenv import gracefully for deployment environments
 try:
@@ -11,11 +57,7 @@ except ImportError:
     # dotenv not available, environment variables should be set directly
     pass
 
-from utils.prompt_template import rag_extraction_prompt, reason_prompt
-from utils.embedding import retrieve_similar_chunks
-from utils.graph_writer import write_tasks_to_neo4j
-import re
-import json
+
 
 # Get OpenAI API key with validation
 openai_key = os.getenv("OPENAI_API_KEY")
@@ -44,7 +86,7 @@ def get_llm():
 # Node: chunked prompt creation for RAG using full email metadata
 def rag_prompt_node(state):
     # Get the current email row data
-    current_email = state.get("current_email_row", {})
+    current_email = convert_dates_to_strings(state.get("current_email_row", {}))
     
     # Format the main email with all metadata for LLM analysis
     main_email_context = format_email_for_llm(current_email)
@@ -88,6 +130,9 @@ def format_email_for_llm(email_row):
     if not email_row:
         return "No email data available"
     
+    # Convert all date/datetime fields to strings
+    email_row = convert_dates_to_strings(email_row)
+
     # Extract all available fields
     message_id = email_row.get("Message-ID", "Unknown")
     date = email_row.get("Date", "Unknown")
@@ -132,7 +177,18 @@ def extract_json_node(state):
     if raw.endswith("```"):
         raw = raw[:-3].strip()
 
-    return {"extracted_json": raw, **state}
+    # Auto-fix common JSON issues
+    cleaned = auto_fix_json(raw)
+
+    # Write raw and cleaned LLM output to debug_output.txt
+    with open("debug_output.txt", "a") as f:
+        f.write("=== RAW LLM OUTPUT ===\n")
+        f.write(raw + "\n")
+        f.write("=== CLEANED LLM OUTPUT ===\n")
+        f.write(cleaned + "\n")
+        f.write("======================\n")
+
+    return {"extracted_json": cleaned, **state}
 
 
 # Auto-fix common JSON formatting issues from LLM responses.
@@ -182,172 +238,35 @@ def auto_fix_json(raw_json: str) -> str:
     cleaned = re.sub(r'(\})\s*\n\s*(\d+):\s*(\])', r'\1\2', cleaned)
     
     return cleaned
-
-
-# Node: validate output
-def validate_json_node(state):
-    retry = state.get("retry_count", 0)
-
-    try:
-        cleaned_json = state["extracted_json"]
-
-        # Auto-fix common JSON issues
-        cleaned_json = auto_fix_json(cleaned_json)
-        
-        parsed = json.loads(cleaned_json)
-        
-        # Check if JSON is meaningful (not empty or missing critical fields)
-        is_meaningful = False
-        
-        if "Topic" in parsed:
-            # Nested structure - check if it has tasks
-            topic = parsed.get("Topic", {})
-            tasks = topic.get("tasks", []) if isinstance(topic, dict) else []
-            is_meaningful = len(tasks) > 0
-        else:
-            # Flat structure - check if it has deliverable/topic
-            has_deliverable = bool(parsed.get("deliverable", "").strip())
-            has_topic = bool(parsed.get("topic", "").strip())
-            is_meaningful = has_deliverable or has_topic
-        
-        if not is_meaningful:
-            print("⚠️ JSON extraction contains no meaningful task data")
-            # Treat empty/meaningless JSON as failed extraction
-            fallback_json = {
-                "topic": "Email Review Required",
-                "summary": "Empty extraction - needs human review",
-                "deliverable": "Manual Review Required",
-                "owner": "Unknown",
-                "role": "Unknown",
-                "department": "Unknown",
-                "organization": "Unknown",
-                "start_date": None,
-                "due_date": None
-            }
-            return {
-                "validated_json": fallback_json,
-                "valid": False,  # Trigger HITL
-                "needs_user_review": True,
-                "retry_count": retry + 1,
-                **state
-            }
-        
-        print(f"✅ JSON extraction successful: {parsed}")
-        return {
-            "validated_json": parsed,
-            "valid": True,
-            "retry_count": retry,
-            **state
-        }
-    except Exception as e:
-        print(f"❌ JSON parsing failed (retry {retry + 1}): {e}")
-        print(f"Raw content: {state.get('extracted_json', 'None')[:100]}...")
-        
-        # Check if error is related to email_index (auto-fix these)
-        error_msg = str(e).lower()
-        email_keywords = ['email_index', 'index', 'email']
-        if any(keyword in error_msg for keyword in email_keywords):
-            print("🔧 Auto-fixing email_index related JSON issue...")
-            fallback_json = {
-                "topic": "Email Review",
-                "summary": "Auto-fixed email index issue",
-                "deliverable": "Extracted Task",
-                "owner": "Unknown",
-                "role": "Unknown",
-                "department": "Unknown",
-                "organization": "Unknown",
-                "start_date": None,
-                "due_date": None
-            }
-            return {
-                "validated_json": fallback_json,
-                "valid": False,  # Changed: Trigger HITL for consistency
-                "needs_user_review": True,  # Flag for HITL workflow
-                "retry_count": retry + 1,
-                **state
-            }
-        
-        if retry >= 2:  # Allow 3 attempts total (0, 1, 2)
-            # Failed extractions should trigger human-in-the-loop
-            fallback_json = {
-                "topic": "Email Review",
-                "summary": "Failed to extract structured data from email",
-                "deliverable": "Manual Review Required",
-                "owner": "Unknown",
-                "role": "Unknown",
-                "department": "Unknown",
-                "organization": "Unknown",
-                "start_date": None,
-                "due_date": None
-            }
-            msg = (f"🔄 Using fallback JSON structure after {retry + 1} "
-                   f"attempts - triggering HITL")
-            print(msg)
-            return {
-                "validated_json": fallback_json,
-                "valid": False,  # Trigger human-in-the-loop
-                "needs_user_review": True,  # Flag for HITL workflow
-                "retry_count": retry + 1,
-                **state
-            }
-        return {
-            "valid": False,
-            "retry_count": retry + 1,
-            **state
-        }
-
-
 # Node: write to graph
+    # Node: write to graph
 def write_graph_node(state):
+    print("=== WRITE_GRAPH_NODE STARTED ===")
     extracted = state["validated_json"]
+    print(f"Extracted task for Neo4j: {extracted}")
     
-    # Ensure the JSON has the expected nested structure
-    if "Topic" not in extracted:
-        # Convert flat structure to nested structure
-        owner_name = extracted.get("owner", "Unknown Owner")
-        owner_role = extracted.get("role", "Unknown Role")
-        owner_dept = extracted.get("department", "Unknown Department")
-        owner_org = extracted.get("organization", "Unknown Organization")
-        
-        topic_name = extracted.get("topic", "Unknown Topic")
-        
-        # Handle collaborators in flat structure
-        collaborators = extracted.get("collaborators", [])
-        if not isinstance(collaborators, list):
-            collaborators = []
-        
-        transformed_data = {
-            "Topic": {
-                "name": topic_name,
-                "tasks": [
-                    {
-                        "task": {
-                            "name": extracted.get("deliverable",
-                                                  "Unnamed Task"),
-                            "start_date": extracted.get("start_date"),
-                            "due_date": extracted.get("due_date"),
-                            "summary": extracted.get("summary", ""),
-                            "owner": {
-                                "name": owner_name,
-                                "role": owner_role,
-                                "department": owner_dept,
-                                "organization": owner_org
-                            },
-                            "collaborators": collaborators
-                        },
-                        "email_index": state.get("email_index")
-                    }
-                ] if extracted.get("deliverable") else []
-            }
-        }
-    else:
-        # JSON already has the correct nested structure
-        transformed_data = extracted
+    # Ensure email_source is never null
+    email_source = extracted.get("Email Source", "")
+    if not email_source or email_source == "Unknown":
+        email_source = f"extracted-{int(time.time())}"  # Generate a unique ID
+    
+    neo4j_task = {
+        "name": extracted.get("Name", "Unnamed Task"),
+        "description": extracted.get("Task Description", ""),
+        "due_date": extracted.get("Due Date"),
+        "received_date": extracted.get("Received Date"),
+        "status": extracted.get("Status"),
+        "topic": extracted.get("Topic"),
+        "priority": extracted.get("Priority Level"),
+        "sender": extracted.get("Sender"),
+        "assignee": extracted.get("Assigned To"),
+        "email_source": email_source
+    }
+    print(f"Neo4j task prepared: {neo4j_task}")
     
     try:
-        # Write to Neo4j instead of NetworkX
-        write_tasks_to_neo4j([transformed_data])
-        print(f"✅ Successfully wrote task to Neo4j: {transformed_data.get('Topic', {}).get('name', 'Unknown')}")
+        write_tasks_to_neo4j([neo4j_task])
+        print(f"✅ Successfully wrote task to Neo4j: {neo4j_task.get('name', 'Unknown')}")
         return {"neo4j_status": "success", "graph": None, **state}
     except Exception as e:
         print(f"❌ Failed to write to Neo4j: {e}")
@@ -358,16 +277,11 @@ def write_graph_node(state):
 def query_graph_node(state):
     """Use improved GraphRAG for flexible semantic queries."""
     try:
-        from utils.graphrag import GraphRAG, format_graphrag_response
+        # from utils.graphrag import GraphRAG, format_graphrag_response
         
         # Use GraphRAG for semantic querying
-        rag = GraphRAG()
-        result = rag.query_with_semantic_reasoning(state["input"])
-        
-        # Format the response for the LLM
-        formatted_response = format_graphrag_response(result)
-        
-        return {"observation": formatted_response, **state}
+        error_msg = "GraphRAG has been removed. Semantic graph queries are not available."
+        return {"observation": error_msg, **state}
     except Exception:
         # Simple fallback if GraphRAG fails
         error_msg = "No graph data available. Please ensure graph is loaded."

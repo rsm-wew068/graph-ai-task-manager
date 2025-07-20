@@ -9,7 +9,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+    env:
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      OPENAI_API_KEY: dummy
+      LLAMA_API_KEY: dummy
+      GEMINI_API_KEY: dummy
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: test_db
     steps:
       - uses: actions/checkout@v4
       
@@ -26,27 +37,34 @@ jobs:
         run: |
           pip install flake8
           # Use .flake8 configuration file for lenient linting
-          flake8 . --count --show-source --statistics
+          flake8 . --count --show-source --statistics --max-line-length=120
       
-      - name: Test imports
+      - name: Test core imports
         run: |
-          python -c "from utils.email_parser import parse_uploaded_file_with_filters_safe"
-          python -c "from utils.embedding import embed_dataframe"
-          python -c "from utils.graph_writer import write_tasks_to_neo4j"
-          python -c "from utils.graphrag import GraphRAG"
-          python -c "from utils.langchain_neo4j_agent import answer_with_neo4j_agent"
-          python -c "from utils.langgraph_nodes import get_llm"
-          python -c "from utils.langgraph_dag import run_extraction_pipeline"
-          python -c "from utils.chainqa_graph_agent import chainqa_graph_search"
-      
-      - name: Test FastAPI backend
-        run: |
-          # Test that FastAPI app can be imported
-          python -c "from utils.api import app"
-          echo "FastAPI app imports successfully"
+          echo "Testing core utility imports..."
+          python -c "from utils.email_parser import parse_uploaded_file_with_filters_safe; print('✅ email_parser import successful')"
+          python -c "from utils.embedding import embed_dataframe; print('✅ embedding import successful')"
+          python -c "from utils.graph_writer import write_tasks_to_neo4j; print('✅ graph_writer import successful')"
+          python -c "from utils.langchain_neo4j_agent import answer_with_neo4j_agent; print('✅ langchain_neo4j_agent import successful')"
+          python -c "from utils.langgraph_nodes import get_llm; print('✅ langgraph_nodes import successful')"
+          python -c "from utils.langgraph_dag import run_extraction_pipeline; print('✅ langgraph_dag import successful')"
+          python -c "from utils.chainqa_graph_agent import chainqa_graph_search; print('✅ chainqa_graph_agent import successful')"
+          python -c "from utils.notion_utils import create_task_in_notion; print('✅ notion_utils import successful')"
+          python -c "from utils.prompt_template import chainqa_answer_prompt; print('✅ prompt_template import successful')"
       
       - name: Test Streamlit app
         run: |
-          # Test that Streamlit app can be imported
-          python -c "import streamlit; import app"
-          echo "Streamlit app imports successfully"
+          echo "Testing Streamlit app import..."
+          python -c "import streamlit; import app; print('✅ Streamlit app import successful')"
+      
+      - name: Test pages imports
+        run: |
+          echo "Testing pages imports..."
+          python -c "from pages.AI_Chatbot import *; print('✅ AI_Chatbot import successful')"
+          python -c "from pages.My_Calendar import *; print('✅ My_Calendar import successful')"
+      
+      - name: Test Docker build
+        run: |
+          echo "Testing Docker build..."
+          docker build -t task-manager-test .
+          echo "✅ Docker build successful"

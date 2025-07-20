@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 import json
 import re
 from typing import List, Dict, Any, Generator
+from utils.prompt_template import chainqa_answer_prompt
 
 load_dotenv()
 
@@ -198,45 +199,21 @@ def step2_relationship_exploration(user_query: str, discovered_entities: List[Di
 def step3_answer_generation(user_query: str, discovery_result: Dict, exploration_result: Dict) -> str:
     """Step 3: Generate natural language answer based on discovered data."""
     
-    answer_prompt = PromptTemplate(
-        input_variables=["question", "discovery_data", "exploration_data", "reasoning"],
-        template="""
-        Based on this graph data, provide a natural and helpful answer to the user's question.
-        
-        Question: {question}
-        
-        Discovery Step Results:
-        - Keywords searched: {discovery_data}
-        - Entities found: {discovery_data}
-        
-        Exploration Step Results:
-        - Related data: {exploration_data}
-        - Reasoning: {reasoning}
-        
-        Instructions:
-        1. If no relevant data was found, explain that clearly
-        2. If data was found, provide a comprehensive but concise answer
-        3. Use natural language, not technical jargon
-        4. Include relevant dates, people, and relationships
-        5. If the data is incomplete, mention what information is missing
-        
-        Provide a helpful, conversational response.
-        """
-    )
-    
-    # Use new RunnableSequence syntax instead of deprecated LLMChain
-    answer_chain = answer_prompt | llm
+    # Use the imported prompt from prompt_template.py
+    answer_chain = chainqa_answer_prompt | llm
     
     # Format data for the prompt
     discovery_summary = json.dumps(discovery_result.get("entities", []), indent=2)
     exploration_summary = json.dumps(exploration_result.get("related_data", []), indent=2)
     reasoning = exploration_result.get("reasoning", "No reasoning provided")
+    entity_count = len(discovery_result.get("entities", []))
     
     answer = answer_chain.invoke({
         "question": user_query,
         "discovery_data": discovery_summary,
         "exploration_data": exploration_summary,
-        "reasoning": reasoning
+        "reasoning": reasoning,
+        "entity_count": entity_count
     })
     
     return answer.content
