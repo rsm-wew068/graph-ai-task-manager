@@ -22,12 +22,12 @@
 
 ```mermaid
 flowchart LR
-    A[Gmail Takeout (.mbox)] --> B[Preprocessing/Filtering]
-    B --> C[LangGraph Extraction Pipeline]
+    A[Gmail Takeout] --> B[Preprocessing]
+    B --> C[LangGraph Pipeline]
     C --> D[HITL Validation]
-    D --> E[Neo4j Graph Construction]
+    D --> E[Neo4j Graph]
     E --> F[Vector Indexing]
-    F --> G[ChainQA AI Chatbot]
+    F --> G[ChainQA Chatbot]
     G --> H[Streamlit UI]
     H --> I[Notion Integration]
 ```
