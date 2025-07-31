@@ -106,20 +106,18 @@ streamlit run app.py
 
 ## 🔄 LangGraph End-to-End Pipeline
 
-### **📊 Complete LangGraph Architecture with LangSmith Observability**
-
 **LangGraph Orchestration Workflows:**
 
-1. **Data Loading Workflow** - Initial data ingestion and preprocessing
-2. **Email Filtering Workflow** - Email classification and filtering
-3. **RAG Processing Workflow** - Retrieval-Augmented Generation processing
-4. **Task Extraction Workflow** - Task identification and extraction
-5. **Validation Workflow** - Data validation and quality checks
-6. **Storage Workflow** - Data persistence and management
-7. **GraphRAG Workflow** - Graph-based retrieval and reasoning
-8. **Calendar Workflow** - Calendar integration and scheduling
-9. **Chatbot Workflow** - Interactive conversation handling
-10. **Evaluation Workflow** - Performance assessment and metrics
+1. **Data Loading** - Initial data ingestion and preprocessing
+2. **Email Filtering** - Email classification and filtering
+3. **RAG Processing** - Retrieval-Augmented Generation processing
+4. **Task Extraction** - Task identification and extraction
+5. **Validation** - Data validation and quality checks
+6. **Storage** - Data persistence and management
+7. **GraphRAG** - Graph-based retrieval and reasoning
+8. **Calendar** - Calendar integration and scheduling
+9. **Chatbot** - Interactive conversation handling
+10. **Evaluation** - Performance assessment and metrics
 
 **LangSmith Observability Components:**
 
