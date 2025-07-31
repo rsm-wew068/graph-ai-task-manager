@@ -40,8 +40,8 @@ Extract, manage, and reason over tasks, people, and knowledge from your emails�
 
 ### Prerequisites
 - Python 3.12+
-- PostgreSQL database (Neon recommended)
-- Neo4j database (Neo4j AuraDB recommended)
+- PostgreSQL database (Neon)
+- Neo4j database (Neo4j AuraDB)
 - OpenAI API key
 
 ### Setup
@@ -288,7 +288,3 @@ The calendar automatically opens at the earliest task due date and provides:
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-**Built with ❤️ using LangGraph, Neo4j, and Streamlit**
