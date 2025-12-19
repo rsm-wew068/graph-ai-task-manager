@@ -196,7 +196,7 @@ if st.button("📥 Load Filtered Emails"):
             # Execute query
             if db.connection is None:
                 st.error("Database connection failed")
-                return
+                st.stop()
             with db.connection.cursor() as cursor:
                 cursor.execute(query, params)
                 emails = [dict(row) for row in cursor.fetchall()]

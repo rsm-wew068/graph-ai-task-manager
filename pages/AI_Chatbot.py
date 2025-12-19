@@ -138,7 +138,7 @@ if user_query := st.chat_input("Ask about your tasks, people, or topics..."):
                         # Get node counts from Neo4j GraphRAG result
                         if rag.driver is None:
                             st.warning("Neo4j connection not available")
-                            return
+                            st.stop()
                         with rag.driver.session() as session:
                             all_nodes = graphrag_result.get('all_nodes', [])
                             if all_nodes:
