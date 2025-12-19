@@ -15,12 +15,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
     - name: Pre-clean runner disk
       run: |
         df -h
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/lib/android || true
+        sudo rm -rf /opt/hostedtoolcache || true
         rm -rf ~/.cache/pip || true
         rm -rf ~/.cache || true
+        docker system prune -af || true
+        df -h
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
@@ -71,10 +79,17 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
     - name: Free disk space
       run: |
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/lib/android || true
+        sudo rm -rf /opt/hostedtoolcache || true
         docker system prune -af || true
+        docker builder prune -af || true
         df -h
 
     - name: Set up Docker Buildx
@@ -88,7 +103,14 @@ jobs:
         load: true
         no-cache: true
         tags: graph-ai-task-manager:latest
+        sbom: false
+        provenance: false
 
     - name: Test Docker image
       run: |
         docker run --rm graph-ai-task-manager:latest python -c "import streamlit; print('✅ Docker image works')"
+    - name: Post-clean disk
+      if: always()
+      run: |
+        docker system prune -af || true
+        df -h
