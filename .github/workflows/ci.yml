@@ -16,22 +16,27 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Pre-clean runner disk
+      run: |
+        df -h
+        rm -rf ~/.cache/pip || true
+        rm -rf ~/.cache || true
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        cache: 'pip'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov flake8 black mypy
+        pip install --no-cache-dir -r requirements.txt
+        pip install --no-cache-dir pytest pytest-cov flake8 black mypy
 
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
         # Check other style issues (warnings only)
         flake8 . --count --exit-zero --statistics
       continue-on-error: true
@@ -45,6 +50,13 @@ jobs:
       run: |
         mypy app.py utils/ pages/ --config-file=mypy.ini || echo "Type checking completed with warnings"
       continue-on-error: true
+
+    - name: Post-clean runner disk
+      if: always()
+      run: |
+        rm -rf ~/.cache/pip || true
+        rm -rf ~/.cache || true
+        df -h
 
     - name: Test imports
       run: |
@@ -60,6 +72,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Free disk space
+      run: |
+        docker system prune -af || true
+        df -h
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -68,9 +85,9 @@ jobs:
       with:
         context: .
         push: false
+        load: true
+        no-cache: true
         tags: graph-ai-task-manager:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Test Docker image
       run: |

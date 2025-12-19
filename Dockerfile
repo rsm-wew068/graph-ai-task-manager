@@ -13,7 +13,7 @@ RUN mkdir -p /.cache && chmod 777 /.cache
 RUN mkdir -p /tmp && chmod 777 /tmp
 
 COPY requirements.txt ./
-RUN pip3 install -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy all necessary files and directories
 COPY app.py ./
