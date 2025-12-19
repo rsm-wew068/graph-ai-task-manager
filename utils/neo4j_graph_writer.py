@@ -24,9 +24,9 @@ class Neo4jGraphWriter:
     """Neo4j graph writer for task data."""
 
     def __init__(self, uri: str = None, username: str = None, password: str = None):
-        self.uri = uri or os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
-        self.username = username or os.getenv("NEO4J_USERNAME", "neo4j")
-        self.password = password or os.getenv("NEO4J_PASSWORD", "password")
+        self.uri = uri or os.getenv("NEO4J_URI")
+        self.username = username or os.getenv("NEO4J_USERNAME")
+        self.password = password or os.getenv("NEO4J_PASSWORD")
         self.driver: Optional[Driver] = None
 
     def connect(self) -> bool:
