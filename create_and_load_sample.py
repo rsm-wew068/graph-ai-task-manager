@@ -135,8 +135,13 @@ def check_current_data():
     try:
         # Check row counts
         logger.info("📋 Current row counts:")
-        for table_name in ['parsed_email', 'tasks', 'task_analysis']:
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+        # Whitelisted table names to prevent SQL injection
+        allowed_tables = ['parsed_email', 'tasks', 'task_analysis']
+        for table_name in allowed_tables:
+            # Use identifier for safe table name insertion
+            from psycopg2 import sql
+            query = sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name))
+            cursor.execute(query)
             count = cursor.fetchone()[0]
             logger.info(f"  {table_name}: {count} rows")
         

@@ -63,15 +63,15 @@ class Neo4jGraphWriter:
                 for record in constraints:
                     try:
                         session.run(f"DROP CONSTRAINT {record['name']}")
-                    except Exception:
-                        pass  # Ignore if already dropped
+                    except Exception as e:
+                        logger.debug(f"Could not drop constraint {record['name']}: {e}")
                 # Drop all indexes
                 indexes = session.run("SHOW INDEXES")
                 for record in indexes:
                     try:
                         session.run(f"DROP INDEX {record['name']}")
-                    except Exception:
-                        pass  # Ignore if already dropped
+                    except Exception as e:
+                        logger.debug(f"Could not drop index {record['name']}: {e}")
             logger.info("✅ Neo4j graph and schema fully cleared")
             return True
         except Exception as e:
@@ -101,9 +101,9 @@ class Neo4jGraphWriter:
                 for constraint in constraints:
                     try:
                         session.run(constraint)
-                    except Exception:
+                    except Exception as e:
                         # Constraint might already exist
-                        pass
+                        logger.debug(f"Constraint already exists or error: {e}")
             logger.info("✅ Neo4j constraints created")
             return True
         except Exception as e:

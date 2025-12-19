@@ -33,8 +33,10 @@ def check_environment():
 try:
     # Set configuration for maximum upload size
     st._config.set_option('server.maxUploadSize', 1024)  # 1GB in MB
-except Exception:
-    pass  # Ignore if config setting fails
+except Exception as e:
+    # Config setting may fail in some Streamlit versions, continue anyway
+    import logging
+    logging.debug(f"Could not set maxUploadSize config: {e}")
 
 st.set_page_config(
     page_title="Automated Task Manager", 
