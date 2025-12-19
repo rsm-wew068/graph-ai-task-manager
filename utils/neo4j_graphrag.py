@@ -4,7 +4,7 @@ Neo4j GraphRAG - Replaces NetworkX with Neo4j for better performance!
 Maintains the same interface as the original GraphRAG system.
 """
 from openai import OpenAI
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, Driver
 from sklearn.metrics.pairwise import cosine_similarity
 import os
 from typing import List, Dict, Tuple, Optional
@@ -43,7 +43,7 @@ class Neo4jGraphRAG:
             raise ValueError("OPENAI_API_KEY environment variable not set")
         self.openai_client = OpenAI(api_key=api_key)
 
-        self.driver = None
+        self.driver: Optional[Driver] = None
         self.node_embeddings: Dict[str, np.ndarray] = {}
 
     def connect(self) -> bool:
@@ -65,6 +65,7 @@ class Neo4jGraphRAG:
         """Close Neo4j connection."""
         if self.driver:
             self.driver.close()
+            self.driver = None
 
     def load_graph_with_embeddings(self) -> bool:
         """Load graph data and compute semantic embeddings."""
@@ -80,6 +81,7 @@ class Neo4jGraphRAG:
 
     def _compute_embeddings(self):
         """Compute OpenAI embeddings for all nodes."""
+        assert self.driver is not None
         with self.driver.session() as session:
             # Get all nodes with their labels and names
             result = session.run(
@@ -127,7 +129,7 @@ class Neo4jGraphRAG:
                     logger.error(f"❌ Failed to compute embeddings: {e}")
                     raise
 
-    def semantic_search(self, query: str, top_k: int = 10) -> List[Tuple[int, float]]:
+    def semantic_search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
         """Find nodes most similar to query using OpenAI embeddings."""
         if not self.node_embeddings:
             return []
@@ -158,6 +160,7 @@ class Neo4jGraphRAG:
         """Expand from starting nodes following meaningful connections (bi-directional, any type)."""
         if not start_node_ids:
             return set()
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -236,6 +239,7 @@ class Neo4jGraphRAG:
 
             topic_matches = []
 
+            assert self.driver is not None
             with self.driver.session() as session:
                 # Get all topic nodes
                 result = session.run(
@@ -286,6 +290,7 @@ class Neo4jGraphRAG:
         if not node_ids:
             return []
 
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -307,6 +312,7 @@ class Neo4jGraphRAG:
 
         node_ids = [node_id for node_id, score in topic_matches]
 
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -327,6 +333,7 @@ class Neo4jGraphRAG:
 
     def _get_available_topics(self) -> List[str]:
         """Get list of all available topic names."""
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -356,6 +363,7 @@ class Neo4jGraphRAG:
             if not nodes_to_show:
                 return "<p>No nodes found in query result</p>"
 
+            assert self.driver is not None
             with self.driver.session() as session:
                 # Get nodes with their properties
                 node_result = session.run(
@@ -469,6 +477,7 @@ class Neo4jGraphRAG:
         similarities = []
         node_id_to_name = {}
         node_id_to_label = {}
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -609,6 +618,7 @@ class Neo4jGraphRAG:
         """Extract meaningful context strings from node names for RAGAS evaluation."""
         contexts = []
 
+        assert self.driver is not None
         with self.driver.session() as session:
             # Get detailed information for each node
             for node_name in node_names[:10]:  # Limit to 10 nodes for context
@@ -657,6 +667,7 @@ class Neo4jGraphRAG:
         if not self.driver:
             return []
         names = []
+        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 "MATCH (n) RETURN n.name AS name LIMIT $limit", limit=limit
@@ -681,6 +692,7 @@ def format_response(result: Dict) -> str:
         if not graphrag.connect():
             return "Error connecting to Neo4j database."
 
+        assert graphrag.driver is not None
         with graphrag.driver.session() as session:
             # Find all tasks in the result
             task_result = session.run(

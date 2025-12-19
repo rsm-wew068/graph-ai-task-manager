@@ -58,9 +58,11 @@ class PostgreSQLDatabase:
     def connect(self) -> bool:
         """Establish connection to PostgreSQL database (Neon optimized)."""
         try:
+            # Declare once to avoid mypy redefinition warnings
+            conn: PGConnection
             if self.connection_string:
                 # Use Neon connection string (includes SSL and pooling)
-                conn: PGConnection = psycopg2.connect(
+                conn = psycopg2.connect(
                     self.connection_string,
                     cursor_factory=RealDictCursor,
                     sslmode="require",  # Neon requires SSL
@@ -68,7 +70,7 @@ class PostgreSQLDatabase:
                 logger.info("✅ Connected to Neon PostgreSQL database")
             else:
                 # Fallback to individual parameters
-                conn: PGConnection = psycopg2.connect(
+                conn = psycopg2.connect(
                     host=self.host,
                     port=self.port,
                     database=self.database,

@@ -7,7 +7,7 @@ Provides multiple metrics for evaluating RAG system performance
 import asyncio
 import logging
 import os
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 import numpy as np
 
 # Handle dotenv import gracefully
@@ -73,9 +73,9 @@ class RAGASEvaluator:
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY environment variable not set")
 
-        self.llm = None
-        self.embeddings = None
-        self.metrics = []
+        self.llm: Optional[Any] = None
+        self.embeddings: Optional[Any] = None
+        self.metrics: List[Any] = []
         self._initialize_components()
 
     def _initialize_components(self):
@@ -146,7 +146,7 @@ class RAGASEvaluator:
             sample = SingleTurnSample(**sample_data)
 
             # Evaluate with each metric
-            scores = {}
+            scores: Dict[str, float] = {}
             for metric in self.metrics:
                 try:
                     logger.debug(f"Calculating {metric.name}")
@@ -214,7 +214,7 @@ class RAGASEvaluator:
                 results = asyncio.run(run_batch())
 
             # Aggregate results
-            aggregated = {}
+            aggregated: Dict[str, List[float]] = {}
             for result in results:
                 for metric_name, score in result.items():
                     if metric_name not in aggregated:

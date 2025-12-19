@@ -157,13 +157,14 @@ if st.button("📥 Load Filtered Emails"):
     from utils.database import PostgreSQLDatabase
     import pandas as pd
     from datetime import datetime, timedelta
+    from typing import Any
 
     try:
         db = PostgreSQLDatabase()
         if db.connect():
             # Build the query with filters
             query = "SELECT * FROM parsed_email WHERE 1=1"
-            params = []
+            params: list[Any] = []
 
             # Date filter
             if date_filter == "Last 7 days":
