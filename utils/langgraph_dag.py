@@ -76,7 +76,8 @@ graph_app = workflow.compile()
 
 
 def run_agent_chat_round(user_query: str) -> dict:
-    initial_state = {
+    from typing import Any
+    initial_state: Any = {
         "input": user_query,
         "current_date": datetime.now().strftime("%Y-%m-%d")
     }
@@ -430,5 +431,6 @@ question_workflow.set_finish_point("return_to_ui")
 question_answering_app = question_workflow.compile()
 
 def run_question_answering_pipeline(user_query: str) -> dict:
-    initial_state = {"input": user_query}
+    from typing import Any
+    initial_state: Any = {"input": user_query}
     return question_answering_app.invoke(initial_state)

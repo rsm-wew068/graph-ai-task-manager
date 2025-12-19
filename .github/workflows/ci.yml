@@ -42,7 +42,7 @@ jobs:
 
     - name: Type check with mypy
       run: |
-        mypy app.py utils/ pages/ --ignore-missing-imports
+        mypy app.py utils/ pages/ --ignore-missing-imports --config-file=mypy.ini
       continue-on-error: true
 
     - name: Test imports
