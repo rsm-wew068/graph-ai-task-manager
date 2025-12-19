@@ -1,4 +1,4 @@
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 # Prompt for reasoning
 reason_prompt = PromptTemplate.from_template("""
