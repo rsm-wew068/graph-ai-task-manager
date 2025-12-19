@@ -7,7 +7,7 @@ Converts extracted task JSON to Neo4j graph database
 import os
 import logging
 from typing import List, Dict, Optional
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, Driver
 
 # Handle dotenv import gracefully for deployment environments
 try:
@@ -27,18 +27,19 @@ class Neo4jGraphWriter:
         self.uri = uri or os.getenv("NEO4J_URI", "bolt://host.docker.internal:7687")
         self.username = username or os.getenv("NEO4J_USERNAME", "neo4j")
         self.password = password or os.getenv("NEO4J_PASSWORD", "password")
-        self.driver = None
+        self.driver: Optional[Driver] = None
 
     def connect(self) -> bool:
         """Establish connection to Neo4j database."""
         try:
-            self.driver = GraphDatabase.driver(
+            drv: Driver = GraphDatabase.driver(
                 self.uri, auth=(self.username, self.password)
             )
             # Test connection
-            with self.driver.session() as session:
+            with drv.session() as session:
                 session.run("RETURN 1")
             logger.info("✅ Connected to Neo4j for graph writing")
+            self.driver = drv
             return True
         except Exception as e:
             logger.error(f"❌ Failed to connect to Neo4j: {e}")
@@ -55,7 +56,9 @@ class Neo4jGraphWriter:
             if not self.connect():
                 return False
         try:
-            with self.driver.session() as session:
+            driver = self.driver
+            assert driver is not None
+            with driver.session() as session:
                 # Delete all nodes and relationships
                 session.run("MATCH (n) DETACH DELETE n")
                 # Drop all constraints
@@ -97,7 +100,9 @@ class Neo4jGraphWriter:
         ]
 
         try:
-            with self.driver.session() as session:
+            driver = self.driver
+            assert driver is not None
+            with driver.session() as session:
                 for constraint in constraints:
                     try:
                         session.run(constraint)
@@ -122,7 +127,9 @@ class Neo4jGraphWriter:
                 return {}
 
         try:
-            with self.driver.session() as session:
+            driver = self.driver
+            assert driver is not None
+            with driver.session() as session:
                 # Count nodes by label
                 stats = {}
                 labels = [

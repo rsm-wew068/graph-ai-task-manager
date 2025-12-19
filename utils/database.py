@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2.extensions import connection as PGConnection
 from psycopg2.extras import RealDictCursor, Json
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
@@ -52,14 +53,14 @@ class PostgreSQLDatabase:
             self.username = username or os.getenv("POSTGRES_USER", "postgres")
             self.password = password or os.getenv("POSTGRES_PASSWORD", "password")
 
-        self.connection = None
+        self.connection: Optional[PGConnection] = None
 
     def connect(self) -> bool:
         """Establish connection to PostgreSQL database (Neon optimized)."""
         try:
             if self.connection_string:
                 # Use Neon connection string (includes SSL and pooling)
-                self.connection = psycopg2.connect(
+                conn: PGConnection = psycopg2.connect(
                     self.connection_string,
                     cursor_factory=RealDictCursor,
                     sslmode="require",  # Neon requires SSL
@@ -67,7 +68,7 @@ class PostgreSQLDatabase:
                 logger.info("✅ Connected to Neon PostgreSQL database")
             else:
                 # Fallback to individual parameters
-                self.connection = psycopg2.connect(
+                conn: PGConnection = psycopg2.connect(
                     host=self.host,
                     port=self.port,
                     database=self.database,
@@ -78,7 +79,8 @@ class PostgreSQLDatabase:
                 )
                 logger.info("✅ Connected to PostgreSQL database")
 
-            self.connection.autocommit = True
+            conn.autocommit = True
+            self.connection = conn
             return True
         except Exception as e:
             logger.error(f"❌ Failed to connect to PostgreSQL: {e}")
@@ -97,6 +99,7 @@ class PostgreSQLDatabase:
                 return False
 
         try:
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 # Create parsed_email table
                 cursor.execute(
@@ -206,6 +209,7 @@ class PostgreSQLDatabase:
         try:
             inserted_ids = []
 
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 for _, row in emails_df.iterrows():
                     # Convert date to proper format
@@ -277,6 +281,7 @@ class PostgreSQLDatabase:
         try:
             inserted_task_ids = []
 
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 for task_data in validated_tasks:
                     # Validate flat structure
@@ -416,6 +421,7 @@ class PostgreSQLDatabase:
                 return []
 
         try:
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -441,6 +447,7 @@ class PostgreSQLDatabase:
                 return []
 
         try:
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -464,6 +471,7 @@ class PostgreSQLDatabase:
                 return {}
 
         try:
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 stats = {}
 
@@ -502,6 +510,7 @@ class PostgreSQLDatabase:
             if not self.connect():
                 return False
         try:
+            assert self.connection is not None
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     "UPDATE tasks SET validation_status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",

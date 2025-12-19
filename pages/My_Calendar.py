@@ -343,7 +343,7 @@ else:
     st.markdown("*Click on any task to see detailed information*")
 
     # Convert tasks to event format
-    events = []
+    events: list[dict] = []
     task_details = {}  # Store detailed task info for lookup
 
     for task_index, task_data in enumerate(tasks):
