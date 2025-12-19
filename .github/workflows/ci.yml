@@ -71,10 +71,10 @@ jobs:
         echo "✅ All imports successful"
 
   docker:
+    # Temporarily disable Docker build to avoid runner disk exhaustion
+    if: false
     runs-on: ubuntu-latest
     needs: test
-    # Only run Docker build on main branch to save resources
-    if: github.ref == 'refs/heads/main'
 
     steps:
     - uses: actions/checkout@v4
