@@ -26,7 +26,7 @@ EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-ENV PYTHONPATH="/app"
+ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 # For Hugging Face Spaces compatibility - use dynamic port if available
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

@@ -4,7 +4,7 @@ Neo4j GraphRAG - Replaces NetworkX with Neo4j for better performance!
 Maintains the same interface as the original GraphRAG system.
 """
 from openai import OpenAI
-from neo4j import GraphDatabase, Driver
+from neo4j import GraphDatabase
 from sklearn.metrics.pairwise import cosine_similarity
 import os
 from typing import List, Dict, Tuple, Optional
@@ -32,11 +32,9 @@ class Neo4jGraphRAG:
         neo4j_password: str = None,
         embedding_model: str = "text-embedding-3-small",
     ):
-        # Prefer Aura-style secure URI via env; support NEO4J_AURA_URI override
-        aura_uri = os.getenv("NEO4J_AURA_URI")
-        self.neo4j_uri = neo4j_uri or aura_uri or os.getenv("NEO4J_URI", "")
-        self.neo4j_username = neo4j_username or os.getenv("NEO4J_USERNAME", "")
-        self.neo4j_password = neo4j_password or os.getenv("NEO4J_PASSWORD", "")
+        self.neo4j_uri = os.getenv("NEO4J_URI")
+        self.neo4j_username = os.getenv("NEO4J_USERNAME")
+        self.neo4j_password = os.getenv("NEO4J_PASSWORD")
         self.embedding_model = embedding_model
 
         # Initialize OpenAI client
@@ -45,31 +43,18 @@ class Neo4jGraphRAG:
             raise ValueError("OPENAI_API_KEY environment variable not set")
         self.openai_client = OpenAI(api_key=api_key)
 
-        self.driver: Optional[Driver] = None
+        self.driver = None
         self.node_embeddings: Dict[str, np.ndarray] = {}
 
     def connect(self) -> bool:
         """Establish connection to Neo4j database."""
-        # Validate Aura credentials and URI
-        if not self.neo4j_uri or not self.neo4j_username or not self.neo4j_password:
-            logger.error(
-                "NEO4J_URI/NEO4J_USERNAME/NEO4J_PASSWORD must be set for Neo4j Aura."
-            )
-            return False
-
-        if self.neo4j_uri.startswith("bolt://"):
-            logger.warning(
-                "Using 'bolt://'. For Neo4j Aura, use a secure URI like 'neo4j+s://' or 'bolt+s://'."
-            )
-
         try:
-            drv: Driver = GraphDatabase.driver(
+            self.driver = GraphDatabase.driver(
                 self.neo4j_uri, auth=(self.neo4j_username, self.neo4j_password)
             )
             # Test connection
-            with drv.session() as session:
+            with self.driver.session() as session:
                 session.run("RETURN 1")
-            self.driver = drv
             logger.info("✅ Connected to Neo4j for GraphRAG")
             return True
         except Exception as e:
@@ -80,7 +65,6 @@ class Neo4jGraphRAG:
         """Close Neo4j connection."""
         if self.driver:
             self.driver.close()
-            self.driver = None
 
     def load_graph_with_embeddings(self) -> bool:
         """Load graph data and compute semantic embeddings."""
@@ -96,7 +80,6 @@ class Neo4jGraphRAG:
 
     def _compute_embeddings(self):
         """Compute OpenAI embeddings for all nodes."""
-        assert self.driver is not None
         with self.driver.session() as session:
             # Get all nodes with their labels and names
             result = session.run(
@@ -144,7 +127,7 @@ class Neo4jGraphRAG:
                     logger.error(f"❌ Failed to compute embeddings: {e}")
                     raise
 
-    def semantic_search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
+    def semantic_search(self, query: str, top_k: int = 10) -> List[Tuple[int, float]]:
         """Find nodes most similar to query using OpenAI embeddings."""
         if not self.node_embeddings:
             return []
@@ -175,7 +158,6 @@ class Neo4jGraphRAG:
         """Expand from starting nodes following meaningful connections (bi-directional, any type)."""
         if not start_node_ids:
             return set()
-        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -304,7 +286,6 @@ class Neo4jGraphRAG:
         if not node_ids:
             return []
 
-        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -326,7 +307,6 @@ class Neo4jGraphRAG:
 
         node_ids = [node_id for node_id, score in topic_matches]
 
-        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -376,7 +356,6 @@ class Neo4jGraphRAG:
             if not nodes_to_show:
                 return "<p>No nodes found in query result</p>"
 
-            assert self.driver is not None
             with self.driver.session() as session:
                 # Get nodes with their properties
                 node_result = session.run(
@@ -490,7 +469,6 @@ class Neo4jGraphRAG:
         similarities = []
         node_id_to_name = {}
         node_id_to_label = {}
-        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -679,7 +657,6 @@ class Neo4jGraphRAG:
         if not self.driver:
             return []
         names = []
-        assert self.driver is not None
         with self.driver.session() as session:
             result = session.run(
                 "MATCH (n) RETURN n.name AS name LIMIT $limit", limit=limit
@@ -704,7 +681,6 @@ def format_response(result: Dict) -> str:
         if not graphrag.connect():
             return "Error connecting to Neo4j database."
 
-        assert graphrag.driver is not None
         with graphrag.driver.session() as session:
             # Find all tasks in the result
             task_result = session.run(
@@ -737,7 +713,6 @@ def format_response(result: Dict) -> str:
                     
                     // Get dates
                     OPTIONAL MATCH (task)-[:SENT_ON]->(sent_date:Date)
-                    OPTIONAL MATCH (task)-[:RECEIVED_ON]->(recv_date:Date)
                     OPTIONAL MATCH (task)-[:DUE_ON]->(due_date:Date)
                     
                     // Get summary
@@ -752,8 +727,8 @@ def format_response(result: Dict) -> str:
                     // Get collaborators
                     OPTIONAL MATCH (task)-[:COLLABORATED_ON]->(collab:Person)
                     
-                          RETURN topic.name as topic_name,
-                              coalesce(sent_date.name, recv_date.name) as sent_date,
+                    RETURN topic.name as topic_name,
+                           sent_date.name as sent_date,
                            due_date.name as due_date,
                            summary.name as summary_text,
                            email.name as email_index,
