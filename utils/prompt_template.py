@@ -1,7 +1,8 @@
 from langchain_core.prompts import PromptTemplate
 
 # Prompt for reasoning
-reason_prompt = PromptTemplate.from_template("""
+reason_prompt = PromptTemplate.from_template(
+    """
 You are a helpful assistant with access to task management data from a knowledge graph.
 
 First, analyze the user's question to determine its intent:
@@ -24,7 +25,8 @@ Task Management Context (use only if relevant to the question):
 
 User Question:
 {name} — {input}
-""")
+"""
+)
 
 # Prompt for verifying the LLM's answer
 verify_prompt = PromptTemplate.from_template(
@@ -44,10 +46,11 @@ Original Answer:
 {draft}
 
 Final Answer (improved):
-""")
+"""
+)
 
 # Prompt for RAG-based task extraction from email content
-example_json = '''{{
+example_json = """{{
   "task_name": "Ensure off-peak deals are entered correctly in the deal blotter by checking settings and deal entry methods.",
   "task_description": "The email discusses issues with the default settings for traders' deal blotters and seeks a solution for correctly entering off-peak deals.",
   "topic": "Deal Blotter",
@@ -61,7 +64,7 @@ example_json = '''{{
   "spam": false,
   "validation_status": "llm",
   "confidence_score": 0.85
-}}'''
+}}"""
 
 rag_extraction_prompt = PromptTemplate.from_template(
     (
@@ -85,11 +88,11 @@ rag_extraction_prompt = PromptTemplate.from_template(
         "EXTRACTION GUIDELINES:\n"
         "1. MESSAGE_ID: Use the exact Message-ID from email metadata\n"
         "   - Copy the Message-ID field exactly as shown in the email metadata\n"
-        "   - Do not use \"Unknown\" or placeholder values\n"
+        '   - Do not use "Unknown" or placeholder values\n'
         "\n"
         "2. TOPIC: Extract a meaningful topic name for the task\n"
         "   - Use subject line, content context, or business domain\n"
-        "   - Examples: \"Finance\", \"Trading\", \"Operations\", \"HR\"\n"
+        '   - Examples: "Finance", "Trading", "Operations", "HR"\n'
         "\n"
         "3. TASK CONTEXT: Use subject line and email metadata to understand:\n"
         "   - Priority level from subject indicators (URGENT, FYI, etc.)\n"
@@ -97,8 +100,8 @@ rag_extraction_prompt = PromptTemplate.from_template(
         "   - Topic context from subject prefixes or email threads\n"
         "\n"
         "4. OWNER IDENTIFICATION: Use email metadata to identify task owners:\n"
-        "   - The \"from_name\" field often indicates who is assigning or reporting on the task\n"
-        "   - The \"to_name\" field indicates primary recipients/responsible parties\n"
+        '   - The "from_name" field often indicates who is assigning or reporting on the task\n'
+        '   - The "to_name" field indicates primary recipients/responsible parties\n'
         "   - If names are not in headers, parse from email signatures/content\n"
         "   - You must return a name. If you cannot identify it from the email content, you should extract it from from_name, to_name fields\n"
         "\n"
@@ -107,14 +110,14 @@ rag_extraction_prompt = PromptTemplate.from_template(
         "   - assigned_to: Use the to_name (person's name, not email) or person mentioned in content\n"
         "\n"
         "6. STATUS: Use one of these exact values:\n"
-        "   - \"not started\" (default for new tasks)\n"
-        "   - \"in progress\" (if task mentions ongoing work)\n"
-        "   - \"completed\" (if task mentions completion)\n"
+        '   - "not started" (default for new tasks)\n'
+        '   - "in progress" (if task mentions ongoing work)\n'
+        '   - "completed" (if task mentions completion)\n'
         "\n"
         "7. DATE EXTRACTION: Look for dates in:\n"
-        "   - Email content mentioning \"due\", \"deadline\", \"by [date]\", \"before\"\n"
+        '   - Email content mentioning "due", "deadline", "by [date]", "before"\n'
         "   - Subject line dates or urgency indicators\n"
-        "   - Email timestamps as context for relative dates (\"by Friday\", \"next week\")\n"
+        '   - Email timestamps as context for relative dates ("by Friday", "next week")\n'
         "   - received_date: Use the Date field from email metadata\n"
         "   - due_date: Extract from content or infer from context\n"
         "\n"
@@ -125,7 +128,7 @@ rag_extraction_prompt = PromptTemplate.from_template(
         "CRITICAL JSON FORMATTING RULES:\n"
         "- Use double quotes for all strings\n"
         "- Add commas after every property except the last one\n"
-        "- Use proper array syntax: [\"item1\", \"item2\"] not 0:\"item1\", 1:\"item2\"\n"
+        '- Use proper array syntax: ["item1", "item2"] not 0:"item1", 1:"item2"\n'
         "- Do not include markdown, backticks, or comments\n"
         "- Ensure all braces and brackets are properly closed\n"
         "- Use null for missing dates, not empty strings\n"
@@ -134,4 +137,3 @@ rag_extraction_prompt = PromptTemplate.from_template(
         "{main_email}\n"
     )
 )
-

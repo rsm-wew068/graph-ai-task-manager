@@ -1,0 +1,28 @@
+[flake8]
+max-line-length = 160
+max-complexity = 25
+ignore = 
+    W293,  # blank line contains whitespace
+    W291,  # trailing whitespace
+    W292,  # no newline at end of file
+    W391,  # blank line at end of file
+    E501,  # line too long (handled by black)
+    E128,  # continuation line under-indented
+    E129,  # visually indented line with same indent
+    E261,  # at least two spaces before inline comment
+    F401,  # imported but unused
+    F841,  # local variable assigned but never used
+    E402,  # module level import not at top of file (Streamlit pattern)
+    E722,  # do not use bare except
+    C901,  # too complex (we'll refactor later)
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    build,
+    dist,
+    *.egg-info,
+    .eggs,
+    .ipynb_checkpoints

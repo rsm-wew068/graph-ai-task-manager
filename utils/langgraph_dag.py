@@ -23,29 +23,33 @@ import json
 def is_meaningful_task(task_name: str, task_obj: dict) -> bool:
     """
     Simplified validation - only reject truly empty or generic fallback tasks.
-    
+
     Args:
         task_name: The name/title of the task
         task_obj: The full task object with additional context
-        
+
     Returns:
         True if task seems meaningful, False if it should trigger HITL
     """
     if not task_name or len(task_name.strip()) <= 3:
         return False
-    
+
     # Only reject obvious fallback/error cases
     fallback_names = [
-        "unnamed task", "extracted task", "manual review required",
-        "email review", "no content", "unknown task"
+        "unnamed task",
+        "extracted task",
+        "manual review required",
+        "email review",
+        "no content",
+        "unknown task",
     ]
-    
+
     name_lower = task_name.lower().strip()
-    
+
     # Only reject exact matches to fallback names
     if name_lower in fallback_names:
         return False
-    
+
     # Accept everything else - let humans decide during HITL if needed
     return True
 
@@ -59,7 +63,7 @@ class AppState(TypedDict, total=False):
     observation: str
     final_answer: str
     last_topic: str  # For conversational memory
-    last_task: str   # For conversational memory
+    last_task: str  # For conversational memory
     conversation_history: list  # For full multi-turn memory
 
 
@@ -77,9 +81,10 @@ graph_app = workflow.compile()
 
 def run_agent_chat_round(user_query: str) -> dict:
     from typing import Any
+
     initial_state: Any = {
         "input": user_query,
-        "current_date": datetime.now().strftime("%Y-%m-%d")
+        "current_date": datetime.now().strftime("%Y-%m-%d"),
     }
     return graph_app.invoke(initial_state)
 
@@ -117,27 +122,52 @@ def attempt_json_parse_node(state):
                 "valid": False,
                 "needs_user_review": True,
                 "status": "no_json_extracted",
-                **state
+                **state,
             }
         import json
+
         parsed = json.loads(extracted)
-        
+
         # Validate flat structure
         required_fields = ["task_name", "task_description", "topic", "message_id"]
-        
+
         # Check required fields
         for field in required_fields:
             if field not in parsed or not parsed[field]:
-                return {"validated_json": {}, "valid": False, "needs_user_review": True, "status": f"Missing required field: {field}", **state}
-        
+                return {
+                    "validated_json": {},
+                    "valid": False,
+                    "needs_user_review": True,
+                    "status": f"Missing required field: {field}",
+                    **state,
+                }
+
         # Validate data types
         if not isinstance(parsed["task_name"], str):
-            return {"validated_json": {}, "valid": False, "needs_user_review": True, "status": "task_name must be a string", **state}
+            return {
+                "validated_json": {},
+                "valid": False,
+                "needs_user_review": True,
+                "status": "task_name must be a string",
+                **state,
+            }
         if not isinstance(parsed["topic"], str):
-            return {"validated_json": {}, "valid": False, "needs_user_review": True, "status": "topic must be a string", **state}
+            return {
+                "validated_json": {},
+                "valid": False,
+                "needs_user_review": True,
+                "status": "topic must be a string",
+                **state,
+            }
         if not isinstance(parsed["message_id"], str):
-            return {"validated_json": {}, "valid": False, "needs_user_review": True, "status": "message_id must be a string", **state}
-        
+            return {
+                "validated_json": {},
+                "valid": False,
+                "needs_user_review": True,
+                "status": "message_id must be a string",
+                **state,
+            }
+
         # Set default values for optional fields if not present
         if "status" not in parsed:
             parsed["status"] = "Pending"
@@ -145,25 +175,28 @@ def attempt_json_parse_node(state):
             parsed["priority_level"] = "Medium"
         if "spam" not in parsed:
             parsed["spam"] = False
-        
+
         return {
             "validated_json": parsed,
             "valid": True,
             "needs_user_review": False,
             "status": "valid_json",
-            **state
+            **state,
         }
     except Exception as e:
-        return {"validated_json": {}, "valid": False, "needs_user_review": True, "status": str(e), **state}
+        return {
+            "validated_json": {},
+            "valid": False,
+            "needs_user_review": True,
+            "status": str(e),
+            **state,
+        }
 
 
 def pause_for_user_review_node(state):
     """This node represents a pause - returns state for UI handling."""
     new_state = dict(state)  # Create a copy
-    new_state.update({
-        "status": "awaiting_user_review",
-        "needs_user_review": True
-    })
+    new_state.update({"status": "awaiting_user_review", "needs_user_review": True})
     return new_state
 
 
@@ -172,16 +205,19 @@ def process_user_correction_node(state):
     try:
         corrected_json = state.get("user_corrected_json", "")
         new_state = dict(state)  # Create a copy
-        
+
         if corrected_json:
             import json
+
             parsed = json.loads(corrected_json)
-            new_state.update({
-                "validated_json": parsed,
-                "valid": True,
-                "needs_user_review": False,
-                "status": "user_corrected"
-            })
+            new_state.update(
+                {
+                    "validated_json": parsed,
+                    "valid": True,
+                    "needs_user_review": False,
+                    "status": "user_corrected",
+                }
+            )
             return new_state
         else:
             # User chose to skip - create minimal fallback
@@ -192,14 +228,16 @@ def process_user_correction_node(state):
                 "message_id": state.get("email_index", "unknown"),
                 "status": "Pending",
                 "priority_level": "Medium",
-                "spam": False
+                "spam": False,
             }
-            new_state.update({
-                "validated_json": fallback,
-                "valid": True,
-                "needs_user_review": False,
-                "status": "user_skipped"
-            })
+            new_state.update(
+                {
+                    "validated_json": fallback,
+                    "valid": True,
+                    "needs_user_review": False,
+                    "status": "user_skipped",
+                }
+            )
             return new_state
     except Exception:
         # Still invalid after user correction - use fallback
@@ -210,23 +248,23 @@ def process_user_correction_node(state):
             "message_id": state.get("email_index", "unknown"),
             "status": "not started",
             "priority_level": "Medium",
-            "spam": False
+            "spam": False,
         }
         new_state = dict(state)
-        new_state.update({
-            "validated_json": fallback,
-            "valid": True,
-            "needs_user_review": False,
-            "status": "correction_failed"
-        })
+        new_state.update(
+            {
+                "validated_json": fallback,
+                "valid": True,
+                "needs_user_review": False,
+                "status": "correction_failed",
+            }
+        )
         return new_state
 
 
 extraction_workflow.add_node("attempt_parse", attempt_json_parse_node)
 extraction_workflow.add_node("pause_for_review", pause_for_user_review_node)
-extraction_workflow.add_node(
-    "process_correction", process_user_correction_node
-)
+extraction_workflow.add_node("process_correction", process_user_correction_node)
 extraction_workflow.add_node("write_graph", write_graph_node)
 
 
@@ -251,11 +289,15 @@ def router(state):
         return "fail"
 
 
-extraction_workflow.add_conditional_edges("attempt_parse", router, {
-    "write_graph": "write_graph",
-    "pause_for_review": "pause_for_review",
-    "fail": "fail"
-})
+extraction_workflow.add_conditional_edges(
+    "attempt_parse",
+    router,
+    {
+        "write_graph": "write_graph",
+        "pause_for_review": "pause_for_review",
+        "fail": "fail",
+    },
+)
 
 # Set finish points - different nodes can end the workflow
 for endpoint in ["write_graph", "fail", "pause_for_review"]:
@@ -280,7 +322,7 @@ def run_extraction_pipeline(email_row, faiss_index, all_chunks, email_index):
         "faiss_index": faiss_index,
         "all_chunks": all_chunks,
         "email_index": email_index,
-        "retry_count": 0
+        "retry_count": 0,
     }
     try:
         # Use the workflow engine to run the full pipeline, including write_graph_node
@@ -307,28 +349,34 @@ def run_extraction_only_pipeline(email_row, faiss_index, all_chunks, email_index
         "faiss_index": faiss_index,
         "all_chunks": all_chunks,
         "email_index": email_index,
-        "retry_count": 0
+        "retry_count": 0,
     }
     try:
         # Create a workflow that stops before write_graph_node
         extraction_only_workflow = StateGraph(ExtractionState)
-        
+
         # Add nodes (same as before but without write_graph)
         extraction_only_workflow.add_node("build_prompt", rag_prompt_node)
         extraction_only_workflow.add_node("extract_json", extract_json_node)
         extraction_only_workflow.add_node("attempt_parse", attempt_json_parse_node)
-        extraction_only_workflow.add_node("pause_for_review", pause_for_user_review_node)
-        extraction_only_workflow.add_node("process_correction", process_user_correction_node)
-        
+        extraction_only_workflow.add_node(
+            "pause_for_review", pause_for_user_review_node
+        )
+        extraction_only_workflow.add_node(
+            "process_correction", process_user_correction_node
+        )
+
         # Add fail and finish nodes
         def fail_node(state):
             return {"status": "extraction_failed", **state}
+
         extraction_only_workflow.add_node("fail", fail_node)
-        
+
         def finish_node(state):
             return {"status": "extraction_complete", **state}
+
         extraction_only_workflow.add_node("finish", finish_node)
-        
+
         def router_extraction_only(state):
             """Route based on validation results - no storage."""
             if state.get("valid", False):
@@ -337,25 +385,29 @@ def run_extraction_only_pipeline(email_row, faiss_index, all_chunks, email_index
                 return "pause_for_review"
             else:
                 return "fail"
-        
-        extraction_only_workflow.add_conditional_edges("attempt_parse", router_extraction_only, {
-            "finish": "finish",
-            "pause_for_review": "pause_for_review",
-            "fail": "fail"
-        })
-        
+
+        extraction_only_workflow.add_conditional_edges(
+            "attempt_parse",
+            router_extraction_only,
+            {
+                "finish": "finish",
+                "pause_for_review": "pause_for_review",
+                "fail": "fail",
+            },
+        )
+
         extraction_only_workflow.add_edge("build_prompt", "extract_json")
         extraction_only_workflow.add_edge("extract_json", "attempt_parse")
         extraction_only_workflow.add_edge("pause_for_review", "process_correction")
         extraction_only_workflow.add_edge("process_correction", "attempt_parse")
-        
+
         extraction_only_workflow.set_entry_point("build_prompt")
         extraction_only_workflow.set_finish_point("finish")
         extraction_only_workflow.set_finish_point("fail")
         extraction_only_workflow.set_finish_point("pause_for_review")
-        
+
         extraction_only_app = extraction_only_workflow.compile()
-        
+
         # Run the extraction-only workflow
         result = extraction_only_app.invoke(state)
         return result
@@ -364,35 +416,33 @@ def run_extraction_only_pipeline(email_row, faiss_index, all_chunks, email_index
         return {"validated_json": {}, "valid": False, "error": str(e)}
 
 
-def resume_extraction_pipeline_with_correction(
-    paused_state, user_corrected_json
-):
+def resume_extraction_pipeline_with_correction(paused_state, user_corrected_json):
     """Resume the extraction pipeline with user-corrected JSON."""
     # Update the state with user correction
     updated_state = {
         **paused_state,
         "user_corrected_json": user_corrected_json,
-        "needs_user_review": False  # Clear the review flag
+        "needs_user_review": False,  # Clear the review flag
     }
-    
+
     # Resume from the process_correction node
     # We need to create a new graph starting from process_correction
     resume_workflow = StateGraph(state_schema=ExtractionState)
-    resume_workflow.add_node(
-        "process_correction", process_user_correction_node
-    )
+    resume_workflow.add_node("process_correction", process_user_correction_node)
     resume_workflow.add_node("write_graph", write_graph_node)
     resume_workflow.add_node("fail", fail_node)
-    
+
     resume_workflow.set_entry_point("process_correction")
     resume_workflow.add_edge("process_correction", "write_graph")
     resume_workflow.set_finish_point(["write_graph", "fail"])
-    
+
     resume_app = resume_workflow.compile()
     return resume_app.invoke(updated_state)
 
+
 # --- New: Fully Graph-Native Entity-Agnostic QA Pipeline ---
 from langgraph.graph import StateGraph
+
 
 class QAState(TypedDict, total=False):
     input: str
@@ -407,6 +457,7 @@ class QAState(TypedDict, total=False):
     ragas_scores: dict
     ragas_summary: str
     # Add more as needed
+
 
 question_workflow = StateGraph(state_schema=QAState)
 question_workflow.add_node("classify_node_type", classify_node_type)
@@ -430,7 +481,9 @@ question_workflow.set_finish_point("return_to_ui")
 
 question_answering_app = question_workflow.compile()
 
+
 def run_question_answering_pipeline(user_query: str) -> dict:
     from typing import Any
+
     initial_state: Any = {"input": user_query}
     return question_answering_app.invoke(initial_state)

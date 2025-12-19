@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 # Handle dotenv import gracefully for deployment environments
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     # dotenv not available, environment variables should be set directly
@@ -12,6 +13,7 @@ except ImportError:
 
 from utils.prompt_template import rag_extraction_prompt, reason_prompt
 from utils.embedding import retrieve_similar_chunks
+
 # Old import removed - using flat structure methods directly
 from utils.database import store_validated_tasks
 import re
@@ -20,22 +22,34 @@ import openai
 from neo4j import GraphDatabase
 from openai import OpenAI
 
+
 def validate_cypher(cypher):
     # Only allow read-only queries
-    forbidden = ['CREATE', 'MERGE', 'SET', 'DELETE', 'REMOVE', 'DROP', 'CALL db.', 'LOAD CSV']
+    forbidden = [
+        "CREATE",
+        "MERGE",
+        "SET",
+        "DELETE",
+        "REMOVE",
+        "DROP",
+        "CALL db.",
+        "LOAD CSV",
+    ]
     for word in forbidden:
-        if re.search(r'\b' + word + r'\b', cypher, re.IGNORECASE):
+        if re.search(r"\b" + word + r"\b", cypher, re.IGNORECASE):
             return False
     return True
+
 
 def fetch_task_summary_from_neo4j(driver, task_name):
     with driver.session() as session:
         result = session.run(
             "MATCH (t:Task {name: $task_name}) RETURN t.summary AS summary",
-            task_name=task_name
+            task_name=task_name,
         )
         record = result.single()
         return record["summary"] if record else None
+
 
 def advanced_graph_query_node(state):
     user_query = state.get("input", "")
@@ -43,11 +57,14 @@ def advanced_graph_query_node(state):
 
     # 1. Retrieve context from GraphRAG (ChainQA: open-ended)
     from utils.neo4j_graphrag import Neo4jGraphRAG
+
     rag = Neo4jGraphRAG()
     # Use flexible retrieval for ChainQA
     graph_result = rag.query_flexible(user_query)
-    context = graph_result.get('all_nodes', [])
-    formatted_context = '\n'.join(context) if context else 'No relevant graph data found.'
+    context = graph_result.get("all_nodes", [])
+    formatted_context = (
+        "\n".join(context) if context else "No relevant graph data found."
+    )
 
     # 2. Generate answer directly from graph context (skip ChainQA LLM)
     # --- ChainQA LLM call skipped ---
@@ -67,43 +84,62 @@ def advanced_graph_query_node(state):
     # final_answer = answer_response.choices[0].message.content.strip()
 
     # Instead, compose a simple answer from the graph context
-    if context and context != ['No relevant graph data found.']:
+    if context and context != ["No relevant graph data found."]:
         final_answer = f"Here is what was found in the graph for your question:\n{formatted_context}"
     else:
-        final_answer = "No relevant information was found in the graph for your question."
+        final_answer = (
+            "No relevant information was found in the graph for your question."
+        )
 
     # 3. RAGAS evaluation (as before, on the composed answer)
     import threading
     import logging
+
     logger = logging.getLogger(__name__)
     ragas_scores = None
     ragas_summary = None
+
     def run_ragas_eval():
         try:
             from utils.ragas_evaluator import RAGASEvaluator
             import asyncio
+
             evaluator = RAGASEvaluator()
             ragas_scores_local = asyncio.run(
-                evaluator.evaluate_single(user_query, final_answer, [formatted_context], ground_truth=formatted_context)
+                evaluator.evaluate_single(
+                    user_query,
+                    final_answer,
+                    [formatted_context],
+                    ground_truth=formatted_context,
+                )
             )
             nonlocal ragas_scores, ragas_summary
             ragas_scores = ragas_scores_local
-            if ragas_scores and all(isinstance(v, float) for v in ragas_scores.values()):
+            if ragas_scores and all(
+                isinstance(v, float) for v in ragas_scores.values()
+            ):
                 ragas_summary = evaluator.format_evaluation_summary(ragas_scores)
             else:
-                ragas_summary = "⚠️ RAGAS evaluation unavailable: No valid scores returned."
+                ragas_summary = (
+                    "⚠️ RAGAS evaluation unavailable: No valid scores returned."
+                )
         except Exception as e:
             logger.error(f"[RAGAS] Exception: {e}")
             ragas_scores = {}
             ragas_summary = f"⚠️ RAGAS evaluation unavailable: {e}"
+
     threading.Thread(target=run_ragas_eval, daemon=True).start()
 
     return {
         "observation": final_answer,
         "graph_context": formatted_context,
         "ragas_scores": ragas_scores if ragas_scores is not None else {},
-        "ragas_summary": ragas_summary if ragas_summary is not None else "RAGAS evaluation in progress...",
-        **state
+        "ragas_summary": (
+            ragas_summary
+            if ragas_summary is not None
+            else "RAGAS evaluation in progress..."
+        ),
+        **state,
     }
 
 
@@ -113,9 +149,10 @@ if not openai_key:
     print("❌ WARNING: OPENAI_API_KEY environment variable not found!")
     print("Available environment variables:")
     for key in sorted(os.environ.keys()):
-        if 'API' in key.upper() or 'KEY' in key.upper():
-            value_preview = ('***' if key.endswith('_KEY')
-                             else os.environ[key][:20] + '...')
+        if "API" in key.upper() or "KEY" in key.upper():
+            value_preview = (
+                "***" if key.endswith("_KEY") else os.environ[key][:20] + "..."
+            )
             print(f"  {key}: {value_preview}")
 else:
     print(f"✅ OPENAI_API_KEY found: {openai_key[:10]}...")
@@ -127,8 +164,7 @@ def get_llm():
             "OPENAI_API_KEY environment variable is required but not set. "
             "Please set it in your Hugging Face Space settings."
         )
-    return ChatOpenAI(model="gpt-4o", temperature=0.2,
-                      openai_api_key=openai_key)
+    return ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=openai_key)
 
 
 # Node: chunked prompt creation for RAG using full email metadata
@@ -144,10 +180,7 @@ def rag_prompt_node(state):
         query_text = current_email.get("content", "")
         if query_text and state.get("faiss_index") is not None:
             related = retrieve_similar_chunks(
-                query_text,
-                index=state["faiss_index"],
-                chunks=state["all_chunks"],
-                k=2
+                query_text, index=state["faiss_index"], chunks=state["all_chunks"], k=2
             )
             related_email_1 = related[0] if len(related) > 0 else ""
             related_email_2 = related[1] if len(related) > 1 else ""
@@ -155,13 +188,18 @@ def rag_prompt_node(state):
             related_email_1 = ""
             related_email_2 = ""
         from utils.prompt_template import example_json
+
         prompt = rag_extraction_prompt.format(
             main_email=main_email_context,
             related_email_1=related_email_1,
             related_email_2=related_email_2,
-            example_json=example_json
+            example_json=example_json,
         )
-        print("[DEBUG] Prompt constructed in rag_prompt_node:", prompt[:500], "... (truncated)")
+        print(
+            "[DEBUG] Prompt constructed in rag_prompt_node:",
+            prompt[:500],
+            "... (truncated)",
+        )
         result = {"rag_prompt": prompt, **state}
         print("[DEBUG] Exiting rag_prompt_node. Result keys:", list(result.keys()))
         return result
@@ -173,16 +211,16 @@ def rag_prompt_node(state):
 def format_email_for_llm(email_row):
     """
     Format a complete email row with all metadata for LLM analysis.
-    
+
     Args:
         email_row: Dictionary containing all email fields from parser
-        
+
     Returns:
         Formatted string with all email metadata and content
     """
     if not email_row:
         return "No email data available"
-    
+
     # Extract all available fields - handle both parquet and database column names
     message_id = email_row.get("message_id") or email_row.get("Message-ID", "Unknown")
     date = email_row.get("date_received") or email_row.get("Date", "Unknown")
@@ -196,14 +234,26 @@ def format_email_for_llm(email_row):
     bcc_name = email_row.get("bcc_name") or email_row.get("Name-Bcc", "None") or "None"
     subject = email_row.get("subject") or email_row.get("Subject", "No Subject")
     content = email_row.get("content", "No content")
-    
+
     # Debug print for all fields
-    print("[DEBUG] format_email_for_llm fields:", {
-        'message_id': message_id, 'date': date, 'from_email': from_email, 'to_email': to_email,
-        'cc_email': cc_email, 'bcc_email': bcc_email, 'from_name': from_name, 'to_name': to_name,
-        'cc_name': cc_name, 'bcc_name': bcc_name, 'subject': subject, 'content': content
-    })
-    
+    print(
+        "[DEBUG] format_email_for_llm fields:",
+        {
+            "message_id": message_id,
+            "date": date,
+            "from_email": from_email,
+            "to_email": to_email,
+            "cc_email": cc_email,
+            "bcc_email": bcc_email,
+            "from_name": from_name,
+            "to_name": to_name,
+            "cc_name": cc_name,
+            "bcc_name": bcc_name,
+            "subject": subject,
+            "content": content,
+        },
+    )
+
     formatted = f"""EMAIL METADATA:
 Message-ID: {message_id}
 Date: {date}
@@ -216,7 +266,7 @@ Subject: {subject}
 EMAIL CONTENT:
 {content}
 """
-    
+
     return formatted
 
 
@@ -248,48 +298,48 @@ def extract_json_node(state):
 def auto_fix_json(raw_json: str) -> str:
     """
     Auto-fix common JSON formatting issues from LLM responses.
-    
+
     Args:
         raw_json: Raw JSON string from LLM
-        
+
     Returns:
         Fixed JSON string
     """
     # Step 1: Remove markdown code blocks
     cleaned = raw_json.strip()
     if cleaned.startswith("```json"):
-        cleaned = re.sub(r'^```json\s*', '', cleaned)
+        cleaned = re.sub(r"^```json\s*", "", cleaned)
     elif cleaned.startswith("```"):
-        cleaned = re.sub(r'^```\s*', '', cleaned)
+        cleaned = re.sub(r"^```\s*", "", cleaned)
     if cleaned.endswith("```"):
-        cleaned = re.sub(r'\s*```$', '', cleaned)
-    
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
     # Step 2: Fix missing commas after string/object values
     # Pattern: "value"\n"key": -> "value",\n"key":
-    cleaned = re.sub(r'(".*?")\s*\n\s*(".*?":\s*)', r'\1,\n\2', cleaned)
-    
+    cleaned = re.sub(r'(".*?")\s*\n\s*(".*?":\s*)', r"\1,\n\2", cleaned)
+
     # Step 3: Fix missing commas after object closing braces
     # Pattern: }\n"key": -> },\n"key":
-    cleaned = re.sub(r'(\})\s*\n\s*(".*?":\s*)', r'\1,\n\2', cleaned)
-    
+    cleaned = re.sub(r'(\})\s*\n\s*(".*?":\s*)', r"\1,\n\2", cleaned)
+
     # Step 4: Fix array syntax - convert numbered object keys to proper arrays
     # Pattern: "tasks":[\n0:{ -> "tasks":[{
-    cleaned = re.sub(r'(\[\s*\n\s*)(\d+):\s*\{', r'\1{', cleaned)
-    
+    cleaned = re.sub(r"(\[\s*\n\s*)(\d+):\s*\{", r"\1{", cleaned)
+
     # Step 5: Fix numbered object separators in arrays
     # Pattern: }\n1:{ -> },{
-    cleaned = re.sub(r'(\}\s*\n\s*)(\d+):\s*\{', r'\1,{', cleaned)
-    
+    cleaned = re.sub(r"(\}\s*\n\s*)(\d+):\s*\{", r"\1,{", cleaned)
+
     # Step 6: Fix missing commas after arrays
     # Pattern: ]\n"key": -> ],\n"key":
-    cleaned = re.sub(r'(\])\s*\n\s*(".*?":\s*)', r'\1,\n\2', cleaned)
-    
+    cleaned = re.sub(r'(\])\s*\n\s*(".*?":\s*)', r"\1,\n\2", cleaned)
+
     # Step 7: Fix email_index with unknown values
     cleaned = re.sub(r'"<unknown>"', r'"unknown"', cleaned)
-    
+
     # Step 8: Remove any remaining numbered labels before array closing
-    cleaned = re.sub(r'(\})\s*\n\s*(\d+):\s*(\])', r'\1\2', cleaned)
-    
+    cleaned = re.sub(r"(\})\s*\n\s*(\d+):\s*(\])", r"\1\2", cleaned)
+
     return cleaned
 
 
@@ -303,8 +353,18 @@ def validate_json_node(state):
 
         # Validate flat structure
         required_fields = ["task_name", "task_description", "topic", "message_id"]
-        optional_fields = ["due_date", "received_date", "status", "priority_level", "sender", "assigned_to", "spam", "validation_status", "confidence_score"]
-        
+        optional_fields = [
+            "due_date",
+            "received_date",
+            "status",
+            "priority_level",
+            "sender",
+            "assigned_to",
+            "spam",
+            "validation_status",
+            "confidence_score",
+        ]
+
         # Set default values for optional fields if not present
         if "status" not in parsed:
             parsed["status"] = "not started"
@@ -314,21 +374,44 @@ def validate_json_node(state):
             parsed["priority_level"] = "Medium"
         if "spam" not in parsed:
             parsed["spam"] = False
-        
+
         # Check required fields
         for field in required_fields:
             if field not in parsed or not parsed[field]:
-                print(f"[DEBUG] validate_json_node: Missing required field '{field}'. Parsed:", parsed)
-                return {"validated_json": {}, "valid": False, "error": f"Missing required field: {field}", **state}
-        
+                print(
+                    f"[DEBUG] validate_json_node: Missing required field '{field}'. Parsed:",
+                    parsed,
+                )
+                return {
+                    "validated_json": {},
+                    "valid": False,
+                    "error": f"Missing required field: {field}",
+                    **state,
+                }
+
         # Validate data types
         if not isinstance(parsed["task_name"], str):
-            return {"validated_json": {}, "valid": False, "error": "task_name must be a string", **state}
+            return {
+                "validated_json": {},
+                "valid": False,
+                "error": "task_name must be a string",
+                **state,
+            }
         if not isinstance(parsed["topic"], str):
-            return {"validated_json": {}, "valid": False, "error": "topic must be a string", **state}
+            return {
+                "validated_json": {},
+                "valid": False,
+                "error": "topic must be a string",
+                **state,
+            }
         if not isinstance(parsed["message_id"], str):
-            return {"validated_json": {}, "valid": False, "error": "message_id must be a string", **state}
-        
+            return {
+                "validated_json": {},
+                "valid": False,
+                "error": "message_id must be a string",
+                **state,
+            }
+
         return {"validated_json": parsed, "valid": True, **state}
     except Exception as e:
         print(f"[DEBUG] Exception in validate_json_node: {e}")
@@ -338,7 +421,7 @@ def validate_json_node(state):
 # Node: write to graph and database
 def write_graph_node(state):
     extracted = state["validated_json"]
-    
+
     # Store flat task data directly in PostgreSQL database
     database_success = False
     try:
@@ -348,17 +431,20 @@ def write_graph_node(state):
     except Exception as e:
         print(f"⚠️ Warning: Failed to store in PostgreSQL: {e}")
         # Continue with Neo4j storage even if PostgreSQL fails
-    
+
     # Store in Neo4j graph database using flat structure
     graph_success = False
     try:
         print(">>> About to write to Neo4j:", extracted)  # DEBUG PRINT
-        
+
         # Use the flat structure method for Neo4j
         from utils.neo4j_graph_writer import Neo4jGraphWriter
+
         neo4j_writer = Neo4jGraphWriter()
-        graph_success = neo4j_writer.write_tasks_from_table([extracted], clear_existing=False)
-        
+        graph_success = neo4j_writer.write_tasks_from_table(
+            [extracted], clear_existing=False
+        )
+
         print(">>> Write to Neo4j success:", graph_success)  # DEBUG PRINT
         if graph_success:
             print("✅ Stored tasks in Neo4j graph database")
@@ -367,7 +453,7 @@ def write_graph_node(state):
     except Exception as e:
         print(f"⚠️ Warning: Neo4j storage failed: {e}")
         graph_success = False
-    
+
     return {"graph_stored": graph_success, "database_stored": database_success, **state}
 
 
@@ -376,14 +462,14 @@ def query_graph_node(state):
     """Use improved Neo4j GraphRAG for flexible semantic queries."""
     try:
         from utils.neo4j_graphrag import Neo4jGraphRAG, format_graphrag_response
-        
+
         # Use Neo4j GraphRAG for semantic querying
         rag = Neo4jGraphRAG()
         result = rag.query_with_semantic_reasoning(state["input"])
-        
+
         # Format the response for the LLM
         formatted_response = format_graphrag_response(result)
-        
+
         return {"observation": formatted_response, **state}
     except Exception as e:
         # Fallback with more detailed error info
@@ -399,7 +485,7 @@ def answer_node(state):
         input=state["input"],
         observation=state["observation"],
         current_date=date,
-        name=user_name
+        name=user_name,
     )
     response = get_llm().invoke(filled)
     return {"final_answer": response.content, **state}
@@ -415,10 +501,12 @@ def normalize_task_dates(task_json):
                 t["task"]["sent_date"] = t["task"].pop("sent_date")
     return task_json
 
+
 def classify_node_type(state):
     """LLM-based node to classify the user question as about a Topic, Person, Task, etc."""
     import os
     from openai import OpenAI
+
     question = state.get("input", "")
     api_key = os.getenv("OPENAI_API_KEY")
     client = OpenAI(api_key=api_key)
@@ -430,11 +518,11 @@ def classify_node_type(state):
         "\n"
         "Examples:\n"
         "Q: What did Alice assign Bob?\n"
-        "A: {\"entity_types\": [\"Person\"], \"entity_values\": [\"Alice\", \"Bob\"]}\n"
+        'A: {"entity_types": ["Person"], "entity_values": ["Alice", "Bob"]}\n'
         "Q: What tasks are due next week?\n"
-        "A: {\"entity_types\": [\"Task\", \"Date\"], \"entity_values\": [\"next week\"]}\n"
+        'A: {"entity_types": ["Task", "Date"], "entity_values": ["next week"]}\n'
         "Q: Who owns the Project Phoenix topic?\n"
-        "A: {\"entity_types\": [\"Topic\", \"Person\"], \"entity_values\": [\"Project Phoenix\"]}\n"
+        'A: {"entity_types": ["Topic", "Person"], "entity_values": ["Project Phoenix"]}\n'
         f"Q: {question}\nA: "
     )
     try:
@@ -442,30 +530,36 @@ def classify_node_type(state):
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=100
+            max_tokens=100,
         )
         answer = response.choices[0].message.content.strip()
         import json
+
         try:
             parsed = json.loads(answer)
         except Exception:
             import re
-            match = re.search(r'\{.*\}', answer)
+
+            match = re.search(r"\{.*\}", answer)
             if match:
                 parsed = json.loads(match.group(0))
             else:
                 parsed = {"entity_types": [], "entity_values": []}
         entity_types = parsed.get("entity_types", [])
         entity_values = parsed.get("entity_values", [])
-        print(f"[DEBUG] classify_node_type: entity_types={entity_types}, entity_values={entity_values}")
+        print(
+            f"[DEBUG] classify_node_type: entity_types={entity_types}, entity_values={entity_values}"
+        )
         return {"entity_types": entity_types, "entity_values": entity_values, **state}
     except Exception as e:
         print(f"[DEBUG] classify_node_type exception: {e}")
         return {"entity_types": [], "entity_values": [], **state}
 
+
 def match_node(state):
     """Embed query and match to node(s) of the classified type in Neo4j."""
     from utils.neo4j_graphrag import Neo4jGraphRAG
+
     entity_types = state.get("entity_types", [])
     entity_values = state.get("entity_values", [])
     rag = Neo4jGraphRAG()
@@ -480,12 +574,20 @@ def match_node(state):
                 matched_names.extend(result["matched_nodes"])
             if result.get("matched_node_ids"):
                 matched_node_ids.extend(result["matched_node_ids"])
-    print(f"[DEBUG] match_node: matched_node_ids={matched_node_ids}, matched_names={matched_names}")
-    return {"matched_node_ids": matched_node_ids, "matched_names": matched_names, **state}
+    print(
+        f"[DEBUG] match_node: matched_node_ids={matched_node_ids}, matched_names={matched_names}"
+    )
+    return {
+        "matched_node_ids": matched_node_ids,
+        "matched_names": matched_names,
+        **state,
+    }
+
 
 def expand_graph(state):
     """Expand graph bi-directionally from matched node(s)."""
     from utils.neo4j_graphrag import Neo4jGraphRAG
+
     rag = Neo4jGraphRAG()
     matched_node_ids = state.get("matched_node_ids", [])
     print("[DEBUG] expand_graph: matched_node_ids =", matched_node_ids)
@@ -494,13 +596,17 @@ def expand_graph(state):
         result = rag.query_flexible(state.get("input", ""))
         all_nodes = result.get("all_nodes", [])
     else:
-        all_node_ids = rag.expand_from_nodes(matched_node_ids, max_nodes=25, direct_only=False)
+        all_node_ids = rag.expand_from_nodes(
+            matched_node_ids, max_nodes=25, direct_only=False
+        )
         all_nodes = rag._get_node_names_from_ids(list(all_node_ids))
     print(f"[DEBUG] expand_graph: all_nodes={all_nodes}")
     return {"all_nodes": all_nodes, **state}
 
+
 def generate_graph_html(state):
     from utils.neo4j_graphrag import Neo4jGraphRAG
+
     query = state.get("input", "")
     result = dict(state)
     print("[DEBUG] generate_graph_html: all_nodes =", result.get("all_nodes", []))
@@ -510,31 +616,42 @@ def generate_graph_html(state):
     print("[DEBUG] generate_graph_html: html content=", html)
     return {**state, "graph_html": html}
 
+
 def extract_contexts(state):
     from utils.neo4j_graphrag import Neo4jGraphRAG
+
     rag = Neo4jGraphRAG()
     all_nodes = state.get("all_nodes", [])
     contexts = rag._extract_contexts_from_nodes(all_nodes)
     print(f"[DEBUG] extract_contexts: contexts={contexts}")
     return {**state, "contexts": contexts}
 
+
 def format_response_node(state):
     from utils.neo4j_graphrag import format_response
+
     result = dict(state)
     answer = format_response(result)
     print(f"[DEBUG] format_response_node: answer={answer}")
     return {**state, "final_answer": answer}
 
+
 def evaluate_ragas(state):
     try:
         from utils.ragas_evaluator import RAGASEvaluator
         import asyncio
+
         evaluator = RAGASEvaluator()
         answer = state.get("final_answer", "")
         contexts = state.get("contexts", [])
         user_query = state.get("input", "")
         ragas_scores = asyncio.run(
-            evaluator.evaluate_single(user_query, answer, contexts, ground_truth=contexts[0] if contexts else "")
+            evaluator.evaluate_single(
+                user_query,
+                answer,
+                contexts,
+                ground_truth=contexts[0] if contexts else "",
+            )
         )
         ragas_summary = evaluator.format_evaluation_summary(ragas_scores)
         print(f"[DEBUG] evaluate_ragas: ragas_scores={ragas_scores}")
@@ -543,11 +660,12 @@ def evaluate_ragas(state):
         print(f"[DEBUG] evaluate_ragas exception: {e}")
         return {**state, "ragas_scores": {}, "ragas_summary": str(e)}
 
+
 def return_to_ui(state):
     # Bundle everything for the frontend
     return {
         "graph_html": state.get("graph_html", ""),
         "final_answer": state.get("final_answer", ""),
         "ragas_summary": state.get("ragas_summary", ""),
-        **state
+        **state,
     }

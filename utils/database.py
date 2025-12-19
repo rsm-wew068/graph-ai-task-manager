@@ -10,11 +10,13 @@ import json
 # Handle dotenv import gracefully for deployment environments
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
+
 
 class PostgreSQLDatabase:
     """
@@ -22,17 +24,19 @@ class PostgreSQLDatabase:
     Handles storing parsed emails and validated tasks.
     Optimized for Neon PostgreSQL cloud platform.
     """
-    
-    def __init__(self, 
-                 host: str = None,
-                 port: int = None, 
-                 database: str = None,
-                 username: str = None,
-                 password: str = None,
-                 connection_string: str = None):
+
+    def __init__(
+        self,
+        host: str = None,
+        port: int = None,
+        database: str = None,
+        username: str = None,
+        password: str = None,
+        connection_string: str = None,
+    ):
         # Support both individual parameters and Neon connection string
         self.connection_string = connection_string or os.getenv("DATABASE_URL")
-        
+
         if self.connection_string:
             # Use Neon connection string (preferred method)
             self.host = None
@@ -47,9 +51,9 @@ class PostgreSQLDatabase:
             self.database = database or os.getenv("POSTGRES_DB", "task_manager")
             self.username = username or os.getenv("POSTGRES_USER", "postgres")
             self.password = password or os.getenv("POSTGRES_PASSWORD", "password")
-        
+
         self.connection = None
-    
+
     def connect(self) -> bool:
         """Establish connection to PostgreSQL database (Neon optimized)."""
         try:
@@ -58,7 +62,7 @@ class PostgreSQLDatabase:
                 self.connection = psycopg2.connect(
                     self.connection_string,
                     cursor_factory=RealDictCursor,
-                    sslmode='require'  # Neon requires SSL
+                    sslmode="require",  # Neon requires SSL
                 )
                 logger.info("✅ Connected to Neon PostgreSQL database")
             else:
@@ -70,32 +74,33 @@ class PostgreSQLDatabase:
                     user=self.username,
                     password=self.password,
                     cursor_factory=RealDictCursor,
-                    sslmode='prefer'
+                    sslmode="prefer",
                 )
                 logger.info("✅ Connected to PostgreSQL database")
-            
+
             self.connection.autocommit = True
             return True
         except Exception as e:
             logger.error(f"❌ Failed to connect to PostgreSQL: {e}")
             return False
-    
+
     def close(self):
         """Close PostgreSQL connection."""
         if self.connection:
             self.connection.close()
             self.connection = None
-    
+
     def create_tables(self) -> bool:
         """Create the necessary tables if they don't exist."""
         if not self.connection:
             if not self.connect():
                 return False
-        
+
         try:
             with self.connection.cursor() as cursor:
                 # Create parsed_email table
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS parsed_email (
                         id SERIAL PRIMARY KEY,
                         message_id VARCHAR(255) UNIQUE NOT NULL,
@@ -114,21 +119,23 @@ class PostgreSQLDatabase:
                         processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         file_source VARCHAR(255)
                     )
-                """)
-                
+                """
+                )
+
                 # Create indexes for parsed_email
                 indexes = [
                     "CREATE INDEX IF NOT EXISTS idx_parsed_email_message_id ON parsed_email(message_id)",
                     "CREATE INDEX IF NOT EXISTS idx_parsed_email_date_received ON parsed_email(date_received)",
                     "CREATE INDEX IF NOT EXISTS idx_parsed_email_from_email ON parsed_email(from_email)",
-                    "CREATE INDEX IF NOT EXISTS idx_parsed_email_subject ON parsed_email(subject)"
+                    "CREATE INDEX IF NOT EXISTS idx_parsed_email_subject ON parsed_email(subject)",
                 ]
-                
+
                 for index in indexes:
                     cursor.execute(index)
-                
+
                 # Create tasks table
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS tasks (
                         id SERIAL PRIMARY KEY,
                         email_id INTEGER,
@@ -151,8 +158,9 @@ class PostgreSQLDatabase:
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (email_id) REFERENCES parsed_email(id) ON DELETE SET NULL
                     )
-                """)
-                
+                """
+                )
+
                 # Create indexes for tasks
                 task_indexes = [
                     "CREATE INDEX IF NOT EXISTS idx_tasks_email_id ON tasks(email_id)",
@@ -163,45 +171,47 @@ class PostgreSQLDatabase:
                     "CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)",
                     "CREATE INDEX IF NOT EXISTS idx_tasks_received_date ON tasks(received_date)",
                     "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
-                    "CREATE INDEX IF NOT EXISTS idx_tasks_validation_status ON tasks(validation_status)"
+                    "CREATE INDEX IF NOT EXISTS idx_tasks_validation_status ON tasks(validation_status)",
                 ]
-                
+
                 for index in task_indexes:
                     cursor.execute(index)
-                
+
                 # Note: task_collaborators table removed - using flat structure instead
-                
+
                 logger.info("✅ Database tables created successfully")
                 return True
-                
+
         except Exception as e:
             logger.error(f"❌ Error creating tables: {e}")
             return False
-    
-    def store_parsed_emails(self, emails_df: pd.DataFrame, file_source: str = None) -> List[int]:
+
+    def store_parsed_emails(
+        self, emails_df: pd.DataFrame, file_source: str = None
+    ) -> List[int]:
         """
         Store parsed email data in the parsed_email table.
-        
+
         Args:
             emails_df: DataFrame with parsed email data
             file_source: Name of the source .mbox file
-            
+
         Returns:
             List of inserted email IDs
         """
         if not self.connection:
             if not self.connect():
                 return []
-        
+
         try:
             inserted_ids = []
-            
+
             with self.connection.cursor() as cursor:
                 for _, row in emails_df.iterrows():
                     # Convert date to proper format
-                    date_received = pd.to_datetime(row['Date'])
+                    date_received = pd.to_datetime(row["Date"])
                     # Ensure Message-ID is mapped to message_id in DB
-                    message_id = row.get('Message-ID') or row.get('message_id') or None
+                    message_id = row.get("Message-ID") or row.get("message_id") or None
                     cursor.execute(
                         """
                         INSERT INTO parsed_email (
@@ -218,84 +228,97 @@ class PostgreSQLDatabase:
                         RETURNING id
                         """,
                         {
-                            'message_id': row['Message-ID'],  # <-- Always use Message-ID from DataFrame
-                            'date_received': row['Date'],
-                            'from_email': row['From'],
-                            'to_email': row['To'],
-                            'cc_email': row.get('Cc'),
-                            'bcc_email': row.get('Bcc'),
-                            'from_name': row.get('Name-From'),
-                            'to_name': row.get('Name-To'),
-                            'cc_name': row.get('Name-Cc'),
-                            'bcc_name': row.get('Name-Bcc'),
-                            'subject': row['Subject'],
-                            'content': row['content'],
-                            'content_length': len(row['content']) if row['content'] else 0,
-                            'file_source': file_source
-                        }
+                            "message_id": row[
+                                "Message-ID"
+                            ],  # <-- Always use Message-ID from DataFrame
+                            "date_received": row["Date"],
+                            "from_email": row["From"],
+                            "to_email": row["To"],
+                            "cc_email": row.get("Cc"),
+                            "bcc_email": row.get("Bcc"),
+                            "from_name": row.get("Name-From"),
+                            "to_name": row.get("Name-To"),
+                            "cc_name": row.get("Name-Cc"),
+                            "bcc_name": row.get("Name-Bcc"),
+                            "subject": row["Subject"],
+                            "content": row["content"],
+                            "content_length": (
+                                len(row["content"]) if row["content"] else 0
+                            ),
+                            "file_source": file_source,
+                        },
                     )
-                    
+
                     result = cursor.fetchone()
                     if result:
-                        inserted_ids.append(result['id'])
-            
+                        inserted_ids.append(result["id"])
+
             logger.info(f"✅ Stored {len(inserted_ids)} parsed emails")
             return inserted_ids
-            
+
         except Exception as e:
             logger.error(f"❌ Error storing parsed emails: {e}")
             return []
-    
+
     def store_validated_tasks(self, validated_tasks: List[Dict]) -> List[int]:
         """
         Store validated task data in the tasks table (flat structure).
-        
+
         Args:
             validated_tasks: List of validated task dictionaries (flat structure)
-            
+
         Returns:
             List of inserted task IDs
         """
         if not self.connection:
             if not self.connect():
                 return []
-        
+
         try:
             inserted_task_ids = []
-            
+
             with self.connection.cursor() as cursor:
                 for task_data in validated_tasks:
                     # Validate flat structure
-                    required_fields = ["task_name", "task_description", "topic", "message_id"]
-                    
+                    required_fields = [
+                        "task_name",
+                        "task_description",
+                        "topic",
+                        "message_id",
+                    ]
+
                     if not isinstance(task_data, dict):
                         logger.error("Invalid task JSON: Must be a dictionary")
                         continue
-                    
+
                     # Check required fields
                     missing_fields = []
                     for field in required_fields:
                         if field not in task_data or not task_data[field]:
                             missing_fields.append(field)
-                    
+
                     if missing_fields:
-                        logger.error(f"Invalid task JSON: Missing required fields: {missing_fields}")
+                        logger.error(
+                            f"Invalid task JSON: Missing required fields: {missing_fields}"
+                        )
                         continue
-                    
+
                     # Insert flat task data
                     task_id = self._insert_flat_task(cursor, task_data)
                     if task_id:
                         inserted_task_ids.append(task_id)
-            
-            logger.info(f"✅ Successfully stored {len(inserted_task_ids)} validated tasks")
+
+            logger.info(
+                f"✅ Successfully stored {len(inserted_task_ids)} validated tasks"
+            )
             return inserted_task_ids
-            
+
         except Exception as e:
             logger.error(f"❌ Error storing validated tasks: {e}")
             return []
-    
+
     # Old _insert_single_task method removed - using _insert_flat_task instead
-    
+
     def _insert_flat_task(self, cursor, task_data: Dict) -> Optional[int]:
         """Insert a single flat task into the tasks table."""
         try:
@@ -305,13 +328,15 @@ class PostgreSQLDatabase:
             if message_id:
                 cursor.execute(
                     "SELECT id FROM parsed_email WHERE message_id = %s LIMIT 1",
-                    (message_id,)
+                    (message_id,),
                 )
                 result = cursor.fetchone()
                 if result:
-                    email_id = result['id']
+                    email_id = result["id"]
                 else:
-                    logger.warning(f"Email with message_id {message_id} not found in parsed_email table")
+                    logger.warning(
+                        f"Email with message_id {message_id} not found in parsed_email table"
+                    )
 
             # Extract task details from flat structure
             task_name = safe_val(task_data.get("task_name"))
@@ -341,7 +366,8 @@ class PostgreSQLDatabase:
                     received_date = None
 
             # Insert task into database
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO tasks (
                     email_id, message_id, task_name, task_description, due_date, 
                     received_date, status, topic, priority_level, sender, assigned_to,
@@ -349,15 +375,30 @@ class PostgreSQLDatabase:
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 ) RETURNING id
-            """, (
-                email_id, message_id, task_name, task_description, due_date,
-                received_date, status, topic, priority_level, sender, assigned_to,
-                "enron_sample", spam, validation_status, confidence_score, json.dumps(task_data)
-            ))
+            """,
+                (
+                    email_id,
+                    message_id,
+                    task_name,
+                    task_description,
+                    due_date,
+                    received_date,
+                    status,
+                    topic,
+                    priority_level,
+                    sender,
+                    assigned_to,
+                    "enron_sample",
+                    spam,
+                    validation_status,
+                    confidence_score,
+                    json.dumps(task_data),
+                ),
+            )
 
             result = cursor.fetchone()
             if result:
-                task_id = result['id']
+                task_id = result["id"]
                 logger.info(f"✅ Inserted task: {task_name}")
                 return task_id
             else:
@@ -367,80 +408,90 @@ class PostgreSQLDatabase:
         except Exception as e:
             logger.error(f"❌ Error inserting flat task: {e}")
             return None
-    
+
     def get_parsed_emails(self, limit: int = 100000, offset: int = 0) -> List[Dict]:
         """Retrieve parsed emails from database."""
         if not self.connection:
             if not self.connect():
                 return []
-        
+
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT * FROM parsed_email 
                     ORDER BY date_received DESC
                     LIMIT %s OFFSET %s
-                """, (limit, offset))
-                
+                """,
+                    (limit, offset),
+                )
+
                 return [dict(row) for row in cursor.fetchall()]
-                
+
         except Exception as e:
             logger.error(f"❌ Error retrieving parsed emails: {e}")
             return []
-    
-    def get_tasks_with_collaborators(self, limit: int = 100000, offset: int = 0) -> List[Dict]:
+
+    def get_tasks_with_collaborators(
+        self, limit: int = 100000, offset: int = 0
+    ) -> List[Dict]:
         """Retrieve tasks (simplified - no collaborators table)."""
         if not self.connection:
             if not self.connect():
                 return []
-        
+
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT * FROM tasks
                     ORDER BY created_at DESC
                     LIMIT %s OFFSET %s
-                """, (limit, offset))
-                
+                """,
+                    (limit, offset),
+                )
+
                 return [dict(row) for row in cursor.fetchall()]
-                
+
         except Exception as e:
             logger.error(f"❌ Error retrieving tasks: {e}")
             return []
-    
+
     def get_database_stats(self) -> Dict:
         """Get statistics about the database."""
         if not self.connection:
             if not self.connect():
                 return {}
-        
+
         try:
             with self.connection.cursor() as cursor:
                 stats = {}
-                
+
                 # Count parsed emails
                 cursor.execute("SELECT COUNT(*) as count FROM parsed_email")
-                stats['parsed_emails'] = cursor.fetchone()['count']
-                
+                stats["parsed_emails"] = cursor.fetchone()["count"]
+
                 # Count tasks
                 cursor.execute("SELECT COUNT(*) as count FROM tasks")
-                stats['tasks'] = cursor.fetchone()['count']
-                
+                stats["tasks"] = cursor.fetchone()["count"]
+
                 # Count collaborators (removed - using flat structure)
-                stats['collaborators'] = 0
-                
+                stats["collaborators"] = 0
+
                 # Recent activity
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT DATE(processed_at) as date, COUNT(*) as count 
                     FROM parsed_email 
                     WHERE processed_at >= CURRENT_DATE - INTERVAL '7 days'
                     GROUP BY DATE(processed_at)
                     ORDER BY date DESC
-                """)
-                stats['recent_emails'] = [dict(row) for row in cursor.fetchall()]
-                
+                """
+                )
+                stats["recent_emails"] = [dict(row) for row in cursor.fetchall()]
+
                 return stats
-                
+
         except Exception as e:
             logger.error(f"❌ Error getting database stats: {e}")
             return {}
@@ -454,7 +505,7 @@ class PostgreSQLDatabase:
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     "UPDATE tasks SET validation_status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                    (status, task_id)
+                    (status, task_id),
                 )
             return True
         except Exception as e:
@@ -465,19 +516,25 @@ class PostgreSQLDatabase:
 
 
 # Convenience functions for backward compatibility
-def store_parsed_emails(emails_df: pd.DataFrame, file_source: str = None, connection_string: str = None) -> List[int]:
+def store_parsed_emails(
+    emails_df: pd.DataFrame, file_source: str = None, connection_string: str = None
+) -> List[int]:
     """Store parsed emails in PostgreSQL database (Neon compatible)."""
     db = PostgreSQLDatabase(connection_string=connection_string)
     if not db.create_tables():
         return []
     return db.store_parsed_emails(emails_df, file_source)
 
-def store_validated_tasks(validated_tasks: List[Dict], connection_string: str = None) -> List[int]:
-    """Store validated tasks in PostgreSQL database (Neon compatible).""" 
+
+def store_validated_tasks(
+    validated_tasks: List[Dict], connection_string: str = None
+) -> List[int]:
+    """Store validated tasks in PostgreSQL database (Neon compatible)."""
     db = PostgreSQLDatabase(connection_string=connection_string)
     if not db.create_tables():
         return []
     return db.store_validated_tasks(validated_tasks)
+
 
 def safe_val(val):
     if pd.isnull(val) or val is None:
@@ -493,11 +550,13 @@ if __name__ == "__main__":
             print("✅ Neon PostgreSQL connection successful")
         else:
             print("✅ PostgreSQL connection successful")
-        
+
         if db.create_tables():
             print("✅ Database tables created")
             print("Database stats:", db.get_database_stats())
         db.close()
     else:
         print("❌ PostgreSQL connection failed")
-        print("💡 For Neon, set DATABASE_URL environment variable with your connection string") 
+        print(
+            "💡 For Neon, set DATABASE_URL environment variable with your connection string"
+        )
