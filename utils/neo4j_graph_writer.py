@@ -314,6 +314,3 @@ class Neo4jGraphWriter:
                 message_id=message_id,
                 task_name=task_name,
             )
-
-
-# Old write_tasks_to_graph function and test code removed - using flat structure only
