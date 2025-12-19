@@ -44,9 +44,6 @@ Extract, manage, and reason over tasks, people, and knowledge from your emailsâ€
 - Neo4j database (Neo4j AuraDB)
 - OpenAI API key
 
-### Optional
-- Docker (for local image builds; GitHub Actions Docker stage is temporarily disabled to avoid runner disk-space exhaustion)
-
 ### Setup
 1. **Clone the repository**
    ```bash
@@ -101,7 +98,6 @@ streamlit run app.py
 docker build -t graph-ai-task-manager:local .
 docker run --rm -p 8501:8501 --env-file .env graph-ai-task-manager:local
 ```
-> Note: The GitHub Actions Docker job is currently disabled to conserve runner disk space; build locally when needed.
 
 ### 3. Extract Tasks
 - Click "Load Filtered Emails" to load emails from database
@@ -252,9 +248,6 @@ The calendar automatically opens at the earliest task due date and provides:
 - **Historical Data Support**: Optimized for datasets like Enron (1980-2006)
 
 ## ðŸ”§ Configuration
-
-### CI/CD Notes
-- GitHub Actions runs linting, formatting, and mypy. Docker build is **temporarily disabled** to avoid "No space left on device" on hosted runners. Re-enable in `.github/workflows/ci.yml` when runner space is sufficient.
 
 ### Email Filtering Options
 - **Date Ranges**: Last 7/30/90 days, this year, custom ranges
