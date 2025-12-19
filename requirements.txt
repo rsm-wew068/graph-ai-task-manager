@@ -15,7 +15,7 @@ langgraph>=0.2.31
 # Graph and Database Libraries
 networkx>=3.5
 neo4j>=5.28.2
-psycopg2>=2.9.10
+psycopg2-binary>=2.9.10
 
 # Data Processing
 pandas>=2.1.0
