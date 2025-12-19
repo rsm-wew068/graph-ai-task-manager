@@ -5,7 +5,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    software-properties-common \
     git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,7 +26,7 @@ EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-ENV PYTHONPATH="${PYTHONPATH}:/app"
+ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 # For Hugging Face Spaces compatibility - use dynamic port if available
-CMD streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
